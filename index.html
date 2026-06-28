@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Practice">
+<title>Practice Player</title>
+<style>
+  :root{
+    --paper:#F3EFE7;
+    --paper-2:#EAE4D8;
+    --ink:#2A2724;
+    --ink-soft:#6B655C;
+    --moss:#5F6F52;
+    --moss-light:#DCE3D3;
+    --line:#DAD2C2;
+    --amber:#B5783D;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Helvetica Neue",sans-serif;
+    -webkit-tap-highlight-color:transparent;
+    padding-bottom:3rem;
+  }
+  .wrap{max-width:480px;margin:0 auto;padding:0 1.1rem;}
+  .hero{
+    position:sticky;top:0;z-index:5;
+    background:var(--paper);
+    border-bottom:1px solid var(--line);
+    padding:1.4rem 1.1rem 1rem;
+  }
+  .hero-inner{max-width:480px;margin:0 auto;display:flex;justify-content:space-between;align-items:flex-end;}
+  .hero-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 .2rem;}
+  .hero-count{font-size:2.6rem;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+  .hero-date{font-size:.78rem;color:var(--ink-soft);text-align:right;}
+  .hero-hist{font-size:.78rem;color:var(--moss);text-decoration:underline;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;}
+
+  .audio-bar{
+    margin:1rem 0 0;
+    padding:.7rem .85rem;
+    background:var(--paper-2);
+    border-radius:14px;
+    display:flex;align-items:center;gap:.6rem;
+  }
+  .audio-bar input[type=file]{display:none;}
+  .audio-btn{
+    flex:1;text-align:left;
+    background:#fff;border:1px solid var(--line);border-radius:10px;
+    padding:.55rem .75rem;font-size:.85rem;color:var(--ink);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .audio-status{font-size:.72rem;color:var(--ink-soft);margin-top:.4rem;}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--moss);margin-right:5px;}
+  .dot.off{background:var(--ink-soft);opacity:.4;}
+
+  .section-title{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin:1.6rem 0 .6rem;}
+
+  .seg-card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:.9rem .95rem;
+    margin-bottom:.7rem;
+  }
+  .seg-top{display:flex;justify-content:space-between;align-items:baseline;}
+  .seg-label{font-size:.96rem;font-weight:600;}
+  .seg-time{font-size:.74rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
+  .beads{display:flex;flex-wrap:wrap;gap:4px;margin:.55rem 0 .7rem;min-height:10px;}
+  .bead{width:9px;height:9px;border-radius:50%;background:var(--moss-light);}
+  .bead.filled{background:var(--moss);}
+  .bead-overflow{font-size:.72rem;color:var(--moss);margin-left:2px;}
+
+  .seg-controls{display:flex;align-items:center;gap:.5rem;}
+  .reps-stepper{display:flex;align-items:center;gap:.4rem;background:var(--paper-2);border-radius:9px;padding:.2rem .3rem;}
+  .reps-stepper button{
+    width:26px;height:26px;border-radius:7px;border:none;background:#fff;
+    font-size:.95rem;color:var(--ink);
+  }
+  .reps-val{font-size:.82rem;min-width:18px;text-align:center;font-variant-numeric:tabular-nums;}
+  .btn{
+    border:none;border-radius:10px;font-size:.85rem;font-weight:600;
+    padding:.6rem .85rem;cursor:pointer;
+  }
+  .btn-play{background:var(--moss);color:#fff;flex:1;}
+  .btn-once{background:var(--paper-2);color:var(--ink);}
+  .btn-stop{background:var(--amber);color:#fff;flex:1;}
+  .progress-row{display:flex;align-items:center;justify-content:space-between;margin-top:.6rem;font-size:.78rem;color:var(--moss);}
+  .seg-del{background:none;border:none;color:var(--ink-soft);font-size:.72rem;padding:0;text-decoration:underline;}
+
+  .add-form{
+    background:var(--paper-2);border-radius:14px;padding:.9rem;margin-top:.6rem;
+  }
+  .add-row{display:flex;gap:.5rem;margin-bottom:.5rem;}
+  .add-row input{
+    flex:1;border:1px solid var(--line);border-radius:8px;padding:.45rem .6rem;
+    font-size:.85rem;background:#fff;min-width:0;
+  }
+  .small-btn{background:var(--ink);color:#fff;border:none;border-radius:8px;padding:.5rem .7rem;font-size:.8rem;}
+  .ghost-btn{background:none;border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;font-size:.8rem;color:var(--ink);}
+  .hint{font-size:.74rem;color:var(--ink-soft);margin-top:.5rem;line-height:1.4;}
+
+  .history-panel{display:none;margin-top:.6rem;}
+  .history-panel.open{display:block;}
+  .hist-row{display:flex;justify-content:space-between;font-size:.84rem;padding:.4rem 0;border-bottom:1px solid var(--line);}
+  .hist-row:last-child{border-bottom:none;}
+  .empty{font-size:.85rem;color:var(--ink-soft);padding:1.2rem 0;text-align:center;}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <div>
+      <p class="hero-label">Today's reps</p>
+      <p class="hero-count" id="todayCount">0</p>
+    </div>
+    <div>
+      <p class="hero-date" id="todayDate"></p>
+      <button class="hero-hist" id="histToggle">history</button>
+    </div>
+  </div>
+  <div class="history-panel" id="historyPanel"></div>
+</div>
+
+<div class="wrap">
+
+  <div class="audio-bar">
+    <input type="file" id="audioInput" accept="audio/*">
+    <button class="audio-btn" id="audioPickBtn">Load audio file…</button>
+  </div>
+  <p class="audio-status" id="audioStatus"><span class="dot off"></span>No audio loaded</p>
+
+  <p class="section-title">Segments</p>
+  <div id="segList"></div>
+
+  <div class="add-form" id="addForm">
+    <p class="hint" style="margin-top:0;">Add a segment manually (label, start, end as mm:ss) — or load a manifest.json exported by your trim script.</p>
+    <div class="add-row">
+      <input type="text" id="newLabel" placeholder="Label, e.g. Segment 19">
+    </div>
+    <div class="add-row">
+      <input type="text" id="newStart" placeholder="Start mm:ss">
+      <input type="text" id="newEnd" placeholder="End mm:ss">
+    </div>
+    <div class="add-row">
+      <button class="small-btn" id="addSegBtn">Add segment</button>
+      <input type="file" id="manifestInput" accept="application/json" style="display:none;">
+      <button class="ghost-btn" id="manifestBtn">Load manifest.json</button>
+    </div>
+  </div>
+
+</div>
+
+<audio id="player" preload="metadata"></audio>
+
+<script>
+const player = document.getElementById('player');
+const segListEl = document.getElementById('segList');
+const todayCountEl = document.getElementById('todayCount');
+const todayDateEl = document.getElementById('todayDate');
+const audioStatus = document.getElementById('audioStatus');
+
+const DEFAULT_SEGMENTS = [
+  {id:"seg-1",label:"Segment 1",start:0,end:7000,reps:5},
+  {id:"seg-2",label:"Segment 2",start:9000,end:17000,reps:5},
+  {id:"seg-3",label:"Segment 3",start:19000,end:27000,reps:5},
+  {id:"seg-4",label:"Segment 4",start:29000,end:36000,reps:5},
+  {id:"seg-5",label:"Segment 5",start:38000,end:46000,reps:5},
+  {id:"seg-6",label:"Segment 6",start:48000,end:56000,reps:5},
+  {id:"seg-7",label:"Segment 7",start:58000,end:65000,reps:5},
+  {id:"seg-8",label:"Segment 8",start:67000,end:74000,reps:5},
+  {id:"seg-9",label:"Segment 9",start:76000,end:84000,reps:5},
+  {id:"seg-10",label:"Segment 10",start:86000,end:90000,reps:5},
+  {id:"seg-11",label:"Segment 11",start:92000,end:98000,reps:5},
+  {id:"seg-12",label:"Segment 12",start:100000,end:106000,reps:5},
+  {id:"seg-13",label:"Segment 13",start:108000,end:117000,reps:5},
+  {id:"seg-14",label:"Segment 14",start:119000,end:124000,reps:5},
+  {id:"seg-15",label:"Segment 15",start:126000,end:132000,reps:5},
+  {id:"seg-16",label:"Segment 16",start:134000,end:139000,reps:5},
+  {id:"seg-17",label:"Segment 17",start:141000,end:182000,reps:3},
+  {id:"seg-18",label:"Segment 18",start:184000,end:206000,reps:3}
+];
+
+let segments = [];
+let log = {};
+let nextIdCounter = 100;
+let current = null;
+
+function todayKey(){
+  return new Date().toLocaleDateString('en-CA');
+}
+function fmt(ms){
+  const s = Math.round(ms/1000);
+  const m = Math.floor(s/60);
+  const r = s%60;
+  return m + ':' + String(r).padStart(2,'0');
+}
+function parseMmSs(str){
+  const parts = str.trim().split(':');
+  if(parts.length !== 2) return null;
+  const m = parseInt(parts[0],10);
+  const s = parseInt(parts[1],10);
+  if(isNaN(m) || isNaN(s)) return null;
+  return (m*60+s)*1000;
+}
+
+function loadStorage(){
+  try{
+    const raw = localStorage.getItem('flute-segments');
+    segments = raw ? JSON.parse(raw) : DEFAULT_SEGMENTS.slice();
+  }catch(e){
+    segments = DEFAULT_SEGMENTS.slice();
+  }
+  try{
+    const raw = localStorage.getItem('flute-log');
+    log = raw ? JSON.parse(raw) : {};
+  }catch(e){
+    log = {};
+  }
+  render();
+}
+
+function saveSegments(){
+  try{ localStorage.setItem('flute-segments', JSON.stringify(segments)); }catch(e){}
+}
+function saveLog(){
+  try{ localStorage.setItem('flute-log', JSON.stringify(log)); }catch(e){}
+}
+
+function todayTotal(){
+  const t = log[todayKey()] || {};
+  return Object.values(t).reduce((a,b)=>a+b,0);
+}
+function segCountToday(segId){
+  const t = log[todayKey()] || {};
+  return t[segId] || 0;
+}
+function incrementLog(segId){
+  const key = todayKey();
+  if(!log[key]) log[key] = {};
+  log[key][segId] = (log[key][segId]||0) + 1;
+  todayCountEl.textContent = todayTotal();
+  saveLog();
+}
+
+function renderBeads(count){
+  const cap = 16;
+  let html = '';
+  const shown = Math.min(count, cap);
+  for(let i=0;i<Math.max(shown, Math.min(cap, 5));i++){
+    html += `<span class="bead ${i<shown ? 'filled':''}"></span>`;
+  }
+  if(count > cap){
+    html += `<span class="bead-overflow">+${count-cap}</span>`;
+  }
+  return html;
+}
+
+function render(){
+  todayDateEl.textContent = new Date().toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'});
+  todayCountEl.textContent = todayTotal();
+  segListEl.innerHTML = '';
+  segments.forEach(seg => {
+    const card = document.createElement('div');
+    card.className = 'seg-card';
+    card.dataset.id = seg.id;
+    const isActive = current && current.segId === seg.id;
+    card.innerHTML = `
+      <div class="seg-top">
+        <span class="seg-label">${seg.label}</span>
+        <span class="seg-time">${fmt(seg.start)}–${fmt(seg.end)}</span>
+      </div>
+      <div class="beads">${renderBeads(segCountToday(seg.id))}</div>
+      <div class="seg-controls">
+        <button class="btn btn-once" data-action="once">Play once</button>
+        <div class="reps-stepper">
+          <button data-action="dec">−</button>
+          <span class="reps-val">${seg.reps}</span>
+          <button data-action="inc">+</button>
+        </div>
+        ${isActive
+          ? `<button class="btn btn-stop" data-action="stop">Stop</button>`
+          : `<button class="btn btn-play" data-action="practice">Practice ×${seg.reps}</button>`}
+      </div>
+      ${isActive ? `<div class="progress-row"><span>Rep ${current.repsDone+1} of ${current.repsTotal}</span><button class="seg-del" data-action="cancelonly" style="visibility:hidden;">.</button></div>` : ''}
+      <div class="progress-row" style="margin-top:.35rem;">
+        <span></span>
+        <button class="seg-del" data-action="delete">remove</button>
+      </div>
+    `;
+    segListEl.appendChild(card);
+  });
+}
+
+function playOnce(seg, onDone){
+  if(!player.src){
+    audioStatus.innerHTML = '<span class="dot off"></span>Load an audio file first';
+    return;
+  }
+  player.currentTime = seg.start/1000;
+  player.play().catch(()=>{});
+  function check(){
+    if(player.currentTime*1000 >= seg.end - 60){
+      player.pause();
+      player.removeEventListener('timeupdate', check);
+      onDone();
+    }
+  }
+  player.addEventListener('timeupdate', check);
+}
+
+function startPractice(seg){
+  if(current) return;
+  current = {segId: seg.id, repsTotal: seg.reps, repsDone: 0, stopped: false};
+  render();
+  function step(){
+    if(!current || current.stopped) return;
+    playOnce(seg, () => {
+      if(!current || current.stopped) return;
+      incrementLog(seg.id);
+      current.repsDone++;
+      if(current.repsDone < current.repsTotal){
+        render();
+        setTimeout(step, 900);
+      } else {
+        current = null;
+        render();
+      }
+    });
+  }
+  step();
+}
+
+function stopPractice(){
+  if(!current) return;
+  current.stopped = true;
+  player.pause();
+  current = null;
+  render();
+}
+
+segListEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  const card = e.target.closest('.seg-card');
+  const id = card.dataset.id;
+  const seg = segments.find(s => s.id === id);
+  const action = btn.dataset.action;
+  if(action === 'once'){
+    playOnce(seg, () => incrementLog(seg.id));
+  } else if(action === 'practice'){
+    startPractice(seg);
+  } else if(action === 'stop'){
+    stopPractice();
+  } else if(action === 'inc'){
+    seg.reps = Math.min(seg.reps+1, 50);
+    saveSegments(); render();
+  } else if(action === 'dec'){
+    seg.reps = Math.max(seg.reps-1, 1);
+    saveSegments(); render();
+  } else if(action === 'delete'){
+    segments = segments.filter(s => s.id !== id);
+    saveSegments(); render();
+  }
+});
+
+document.getElementById('audioPickBtn').addEventListener('click', () => {
+  document.getElementById('audioInput').click();
+});
+document.getElementById('audioInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  player.src = url;
+  audioStatus.innerHTML = `<span class="dot"></span>${file.name}`;
+  document.getElementById('audioPickBtn').textContent = file.name;
+});
+
+document.getElementById('manifestBtn').addEventListener('click', () => {
+  document.getElementById('manifestInput').click();
+});
+document.getElementById('manifestInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const parsed = JSON.parse(reader.result);
+      if(Array.isArray(parsed)){
+        segments = parsed.map(s => ({
+          id: s.id || ('seg-' + (nextIdCounter++)),
+          label: s.label || 'Segment',
+          start: s.start,
+          end: s.end,
+          reps: s.reps || 5
+        }));
+        saveSegments();
+        render();
+      }
+    }catch(err){
+      alert('Could not read that manifest file.');
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('addSegBtn').addEventListener('click', () => {
+  const label = document.getElementById('newLabel').value.trim() || ('Segment ' + (segments.length+1));
+  const startStr = document.getElementById('newStart').value.trim();
+  const endStr = document.getElementById('newEnd').value.trim();
+  const start = parseMmSs(startStr);
+  const end = parseMmSs(endStr);
+  if(start === null || end === null || end <= start){
+    alert('Enter valid start and end times as mm:ss, with end after start.');
+    return;
+  }
+  segments.push({id: 'seg-' + (nextIdCounter++), label, start, end, reps: 5});
+  document.getElementById('newLabel').value = '';
+  document.getElementById('newStart').value = '';
+  document.getElementById('newEnd').value = '';
+  saveSegments();
+  render();
+});
+
+const histToggle = document.getElementById('histToggle');
+const historyPanel = document.getElementById('historyPanel');
+histToggle.addEventListener('click', () => {
+  const open = historyPanel.classList.toggle('open');
+  if(open){
+    const dates = Object.keys(log).sort().reverse().slice(0,14);
+    if(dates.length === 0){
+      historyPanel.innerHTML = '<p class="empty">No practice logged yet.</p>';
+      return;
+    }
+    historyPanel.innerHTML = dates.map(d => {
+      const total = Object.values(log[d]).reduce((a,b)=>a+b,0);
+      const label = new Date(d + 'T00:00:00').toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'});
+      return `<div class="hist-row"><span>${label}</span><span>${total} reps</span></div>`;
+    }).join('');
+  }
+});
+
+loadStorage();
+</script>
+</body>
+</html>

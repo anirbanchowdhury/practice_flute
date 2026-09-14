@@ -100,6 +100,7 @@
     display:flex;
     align-items:center;
     gap:6px;
+    cursor:pointer;
     transition:background .2s, color .2s, border-color .2s;
   }
   .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-dim);}
@@ -201,6 +202,14 @@
     margin-top:22px;
     font-size:13px;
     color:var(--ink-dim);
+  }
+  .mode-toggle{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--brass);
+    text-decoration:underline;
+    cursor:pointer;
+    display:none;
   }
 
   /* ---------- controls ---------- */
@@ -416,6 +425,7 @@
       </div>
     </div>
     <div class="position" id="positionLabel">Note 1 of 15</div>
+    <div class="mode-toggle" id="modeToggle"></div>
   </div>
 
   <div class="controls">
@@ -460,9 +470,9 @@
   <div class="field">
     <label>Practice order</label>
     <select id="orderSelect">
-      <option value="asc">Ascending — Pa to Pa</option>
-      <option value="desc">Descending — Pa to Pa</option>
-      <option value="updown">Up and down</option>
+      <option value="updown">Up then down — Pa to Pa to Pa</option>
+      <option value="asc">Ascending only — Pa to Pa</option>
+      <option value="desc">Descending only — Pa to Pa</option>
       <option value="random">Random</option>
     </select>
   </div>
@@ -475,6 +485,11 @@
   <div class="field">
     <label>Pause between notes <span class="val" id="pauseVal">4s</span></label>
     <input type="range" id="pauseRange" min="0" max="10" step="1" value="4">
+  </div>
+
+  <div class="field">
+    <label>Repeats when drilling a single note <span class="val" id="drillRepsVal">5</span></label>
+    <input type="range" id="drillRepsRange" min="1" max="20" step="1" value="5">
   </div>
 
   <div class="field">
@@ -554,9 +569,10 @@
   var DEFAULT_SETTINGS = {
     saMidi: 64,
     chromatic: false,
-    order: 'asc',
+    order: 'updown',
     duration: 16,
     pauseDuration: 4,
+    drillReps: 5,
     refOn: true,
     refVolume: 0.5,
     droneOn: false,
@@ -581,6 +597,8 @@
   var sequence = [];
   var currentIndex = 0;
   var phase = 'note'; // 'note' | 'pause'
+  var mode = 'sequence'; // 'sequence' | 'drill'
+  var drillRepCount = 0;
   var elapsed = 0;
   var isPlaying = false;
   var playStartTs = 0;
@@ -606,6 +624,7 @@
   var saLabel = $('saLabel');
   var streakEl = $('streak');
   var completeScreen = $('completeScreen');
+  var modeToggle = $('modeToggle');
 
   var CIRC = 2 * Math.PI * 90;
 
@@ -616,6 +635,8 @@
       stopPlayback();
       currentIndex = 0;
       phase = 'note';
+      mode = 'sequence';
+      drillRepCount = 0;
       elapsed = 0;
     }
     renderLadder();
@@ -628,8 +649,28 @@
       var pill = document.createElement('div');
       pill.className = 'pill ' + note.saptak + (i === currentIndex ? ' active' : '');
       pill.innerHTML = '<span class="dot"></span>' + note.sargam;
+      pill.addEventListener('click', function(){ enterDrillMode(i); });
       ladderEl.appendChild(pill);
     });
+  }
+
+  function enterDrillMode(i){
+    stopPlayback();
+    mode = 'drill';
+    currentIndex = i;
+    phase = 'note';
+    elapsed = 0;
+    drillRepCount = 0;
+    updateDisplay();
+  }
+
+  function exitDrillMode(){
+    stopPlayback();
+    mode = 'sequence';
+    phase = 'note';
+    elapsed = 0;
+    drillRepCount = 0;
+    updateDisplay();
   }
 
   function updateActivePill(){
@@ -650,22 +691,46 @@
     westernLabel.textContent = note.western + ' · ' + note.freq.toFixed(1) + ' Hz';
     saptakTag.textContent = note.saptak;
     saptakTag.className = 'saptak-tag ' + note.saptak;
-    positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + sequence.length;
     setRing(0);
     timerLabel.textContent = settings.duration + 's';
     updateActivePill();
     saLabel.textContent = WESTERN_NAMES[mod12(settings.saMidi)];
+    renderPositionLabel();
+    renderModeToggle();
   }
 
   function updatePauseDisplay(){
-    var upcoming = sequence[currentIndex + 1];
+    var note = sequence[currentIndex];
     sargamLabel.textContent = '·';
     saptakTag.textContent = 'breathe in';
     saptakTag.className = 'saptak-tag pause';
-    westernLabel.textContent = upcoming ? ('next: ' + upcoming.sargam + ' · ' + upcoming.western) : '';
-    positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + sequence.length;
+    if(mode === 'drill'){
+      westernLabel.textContent = 'again: ' + note.sargam + ' · ' + note.western;
+    } else {
+      var upcoming = sequence[currentIndex + 1];
+      westernLabel.textContent = upcoming ? ('next: ' + upcoming.sargam + ' · ' + upcoming.western) : '';
+    }
     timerLabel.textContent = settings.pauseDuration + 's';
     setRing(1);
+    renderPositionLabel();
+  }
+
+  function renderPositionLabel(){
+    if(mode === 'drill'){
+      positionLabel.textContent = 'Repeat ' + drillRepCount + ' of ' + settings.drillReps;
+    } else {
+      positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + sequence.length;
+    }
+  }
+
+  function renderModeToggle(){
+    var note = sequence[currentIndex];
+    if(mode === 'drill' && note){
+      modeToggle.style.display = 'block';
+      modeToggle.textContent = 'Drilling ' + note.sargam + ' · tap to return to full sequence';
+    } else {
+      modeToggle.style.display = 'none';
+    }
   }
 
   function setRing(fraction){
@@ -771,6 +836,10 @@
   }
 
   function phaseComplete(){
+    if(mode === 'drill'){
+      drillPhaseComplete();
+      return;
+    }
     if(phase === 'note'){
       stopToneImmediate();
       if(settings.pauseDuration > 0){
@@ -796,6 +865,32 @@
     }
     updateDisplay();
     if(isPlaying) playCurrentSegment();
+  }
+
+  function drillPhaseComplete(){
+    stopToneImmediate();
+    if(phase === 'note'){
+      drillRepCount++;
+      renderPositionLabel();
+      if(drillRepCount >= settings.drillReps){
+        stopPlayback();
+        setRing(0);
+        return;
+      }
+      if(settings.pauseDuration > 0){
+        phase = 'pause';
+        elapsed = 0;
+        updatePauseDisplay();
+        if(isPlaying) playCurrentSegment();
+      } else {
+        elapsed = 0;
+        if(isPlaying) playCurrentSegment();
+      }
+    } else {
+      phase = 'note';
+      elapsed = 0;
+      if(isPlaying) playCurrentSegment();
+    }
   }
 
   function play(){
@@ -836,6 +931,7 @@
     currentIndex = index;
     phase = 'note';
     elapsed = 0;
+    if(mode === 'drill') drillRepCount = 0;
     updateDisplay();
     if(wasPlaying) play();
   }
@@ -876,6 +972,7 @@
   });
   prevBtn.addEventListener('click', function(){ goTo(currentIndex - 1); });
   nextBtn.addEventListener('click', function(){ goTo(currentIndex + 1); });
+  modeToggle.addEventListener('click', exitDrillMode);
 
   $('restartBtn').addEventListener('click', function(){
     completeScreen.classList.remove('show');
@@ -945,6 +1042,21 @@
     phase = 'note';
     elapsed = 0;
     updateDisplay();
+  });
+
+  var drillRepsRange = $('drillRepsRange');
+  var drillRepsVal = $('drillRepsVal');
+  drillRepsRange.value = settings.drillReps;
+  drillRepsVal.textContent = settings.drillReps;
+  drillRepsRange.addEventListener('input', function(){
+    settings.drillReps = parseInt(this.value, 10);
+    drillRepsVal.textContent = settings.drillReps;
+    saveSettings();
+    if(mode === 'drill'){
+      stopPlayback();
+      drillRepCount = 0;
+      updateDisplay();
+    }
   });
 
   function wireSwitch(switchEl, key, onChange){

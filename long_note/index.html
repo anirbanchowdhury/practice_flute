@@ -538,6 +538,15 @@
     </div>
   </div>
 
+  <div class="field" id="octaveField">
+    <label>Which octave</label>
+    <div class="seg" id="octaveSeg">
+      <button data-val="mandra">Mandra</button>
+      <button data-val="madhya">Madhya</button>
+      <button data-val="taar">Taar</button>
+    </div>
+  </div>
+
   <div class="field">
     <label>Notes per round</label>
     <div class="seg" id="countSeg">
@@ -628,6 +637,7 @@
     pauseDuration: 4,
     drillReps: 5,
     gameLevel: 1,
+    gameOctave: 'madhya',
     gameNoteCount: 2,
     gameNoteDuration: 3,
     refOn: true,
@@ -822,11 +832,9 @@
     var basePool = buildSequence(settings.saMidi, settings.chromatic);
     var candidatePool;
     if(level === 1){
-      var saptaks = ['mandra','madhya','taar'].filter(function(s){
-        return basePool.some(function(n){ return n.saptak === s; });
-      });
-      var chosen = saptaks[Math.floor(Math.random()*saptaks.length)];
+      var chosen = settings.gameOctave;
       candidatePool = basePool.filter(function(n){ return n.saptak === chosen; });
+      if(candidatePool.length === 0) candidatePool = basePool.slice();
     } else if(level === 2){
       var pairs = [['mandra','madhya'], ['madhya','taar']].filter(function(p){
         return basePool.some(function(n){ return n.saptak === p[0]; }) &&
@@ -1221,12 +1229,29 @@
   function closeGamePanel(){ gamePanel.classList.remove('show'); overlay.classList.remove('show'); }
   $('gameBtn').addEventListener('click', openGamePanel);
 
+  var octaveField = $('octaveField');
+  function updateOctaveFieldVisibility(){
+    octaveField.style.display = (settings.gameLevel === 1) ? 'block' : 'none';
+  }
+
   var levelSeg = $('levelSeg');
   Array.prototype.forEach.call(levelSeg.children, function(btn){
     btn.classList.toggle('active', parseInt(btn.dataset.val,10) === settings.gameLevel);
     btn.addEventListener('click', function(){
       settings.gameLevel = parseInt(btn.dataset.val, 10);
       Array.prototype.forEach.call(levelSeg.children, function(b){ b.classList.toggle('active', b === btn); });
+      updateOctaveFieldVisibility();
+      saveSettings();
+    });
+  });
+  updateOctaveFieldVisibility();
+
+  var octaveSeg = $('octaveSeg');
+  Array.prototype.forEach.call(octaveSeg.children, function(btn){
+    btn.classList.toggle('active', btn.dataset.val === settings.gameOctave);
+    btn.addEventListener('click', function(){
+      settings.gameOctave = btn.dataset.val;
+      Array.prototype.forEach.call(octaveSeg.children, function(b){ b.classList.toggle('active', b === btn); });
       saveSettings();
     });
   });

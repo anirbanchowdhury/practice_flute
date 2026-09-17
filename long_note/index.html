@@ -395,6 +395,18 @@
     font-size:15px;
     cursor:pointer;
   }
+  .topbar-actions{display:flex; gap:8px;}
+  .reveal-actions{display:flex; gap:10px; flex-wrap:wrap; justify-content:center;}
+  .btn-outline{
+    padding:13px 22px;
+    border-radius:12px;
+    border:1px solid var(--brass);
+    background:transparent;
+    color:var(--brass);
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -405,7 +417,10 @@
       <span class="brand-title">Long Tone</span>
       <span class="brand-sub">bansuri practice · Sa = <span id="saLabel">E</span></span>
     </div>
-    <button class="icon-btn" id="settingsBtn" aria-label="Open settings">⚙</button>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="gameBtn" aria-label="Find the note practice">🎯</button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Open settings">⚙</button>
+    </div>
   </div>
 
   <div class="ladder" id="ladder"></div>
@@ -497,7 +512,7 @@
       <span>Reference pitch</span>
       <div class="switch on" id="refToggle"><div class="knob"></div></div>
     </div>
-    <input type="range" id="refVolume" min="0" max="1" step="0.05" value="0.5">
+    <input type="range" id="refVolume" min="0" max="2" step="0.1" value="1.4">
   </div>
 
   <div class="field">
@@ -505,16 +520,55 @@
       <span>Continuous Sa drone</span>
       <div class="switch" id="droneToggle"><div class="knob"></div></div>
     </div>
-    <input type="range" id="droneVolume" min="0" max="1" step="0.05" value="0.22">
+    <input type="range" id="droneVolume" min="0" max="1.5" step="0.05" value="0.4">
   </div>
 
   <button class="done-btn" id="closeSettings">Done</button>
+</div>
+
+<div class="settings-panel" id="gamePanel">
+  <h3>Find the Note</h3>
+
+  <div class="field">
+    <label>Difficulty level</label>
+    <div class="seg" id="levelSeg">
+      <button data-val="1">1 · same octave</button>
+      <button data-val="2">2 · two octaves</button>
+      <button data-val="3">3 · any octave</button>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Notes per round</label>
+    <div class="seg" id="countSeg">
+      <button data-val="1">1</button>
+      <button data-val="2">2</button>
+      <button data-val="3">3</button>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Seconds per note <span class="val" id="gameDurationVal">3s</span></label>
+    <input type="range" id="gameDurationRange" min="1" max="10" step="1" value="3">
+  </div>
+
+  <button class="done-btn" id="startGameBtn">Start round</button>
 </div>
 
 <div class="complete-screen" id="completeScreen">
   <h2>Session complete</h2>
   <p>Every note from lower Pa to high Pa, held steady. Nice breath control.</p>
   <button id="restartBtn">Practice again</button>
+</div>
+
+<div class="complete-screen" id="gameRevealScreen">
+  <h2>Round complete</h2>
+  <p>You heard: <span id="gameRevealText"></span></p>
+  <div class="reveal-actions">
+    <button id="gameReplayBtn">Play again</button>
+    <button class="btn-outline" id="gameNewRoundBtn">New round</button>
+    <button class="btn-outline" id="gameExitBtn">Back to practice</button>
+  </div>
 </div>
 
 <script>
@@ -573,10 +627,13 @@
     duration: 16,
     pauseDuration: 4,
     drillReps: 5,
+    gameLevel: 1,
+    gameNoteCount: 2,
+    gameNoteDuration: 3,
     refOn: true,
-    refVolume: 0.5,
+    refVolume: 1.4,
     droneOn: false,
-    droneVolume: 0.22
+    droneVolume: 0.4
   };
 
   var settings = loadSettings();
@@ -596,9 +653,11 @@
   // ---------- state ----------
   var sequence = [];
   var currentIndex = 0;
-  var phase = 'note'; // 'note' | 'pause'
-  var mode = 'sequence'; // 'sequence' | 'drill'
+  var phase = 'note'; // 'note' | 'pause' | 'prep'
+  var mode = 'sequence'; // 'sequence' | 'drill' | 'game'
   var drillRepCount = 0;
+  var needsPrep = true;
+  var gameSequence = [];
   var elapsed = 0;
   var isPlaying = false;
   var playStartTs = 0;
@@ -607,6 +666,7 @@
   var audioCtx = null;
   var toneOsc = null, toneGain = null;
   var droneOsc = null, droneGain = null;
+  var masterBus = null;
 
   // ---------- DOM ----------
   var $ = function(id){ return document.getElementById(id); };
@@ -625,6 +685,9 @@
   var streakEl = $('streak');
   var completeScreen = $('completeScreen');
   var modeToggle = $('modeToggle');
+  var gamePanel = $('gamePanel');
+  var gameRevealScreen = $('gameRevealScreen');
+  var gameRevealText = $('gameRevealText');
 
   var CIRC = 2 * Math.PI * 90;
 
@@ -637,6 +700,7 @@
       phase = 'note';
       mode = 'sequence';
       drillRepCount = 0;
+      needsPrep = true;
       elapsed = 0;
     }
     renderLadder();
@@ -661,6 +725,7 @@
     phase = 'note';
     elapsed = 0;
     drillRepCount = 0;
+    needsPrep = true;
     updateDisplay();
   }
 
@@ -733,6 +798,117 @@
     }
   }
 
+  function updatePrepDisplay(){
+    sargamLabel.textContent = '·';
+    saptakTag.textContent = 'get ready';
+    saptakTag.className = 'saptak-tag pause';
+    timerLabel.textContent = settings.pauseDuration + 's';
+    setRing(1);
+    if(mode === 'game'){
+      westernLabel.textContent = '';
+      positionLabel.textContent = 'Round starts in ' + settings.pauseDuration + 's';
+      modeToggle.style.display = 'block';
+      modeToggle.textContent = 'Find-the-note round · tap to stop';
+    } else {
+      var note = sequence[currentIndex];
+      westernLabel.textContent = note ? ('first: ' + note.sargam + ' · ' + note.western) : '';
+      renderPositionLabel();
+      renderModeToggle();
+    }
+  }
+
+  // ---------- "find the note" game ----------
+  function pickGameNotes(level, count){
+    var basePool = buildSequence(settings.saMidi, settings.chromatic);
+    var candidatePool;
+    if(level === 1){
+      var saptaks = ['mandra','madhya','taar'].filter(function(s){
+        return basePool.some(function(n){ return n.saptak === s; });
+      });
+      var chosen = saptaks[Math.floor(Math.random()*saptaks.length)];
+      candidatePool = basePool.filter(function(n){ return n.saptak === chosen; });
+    } else if(level === 2){
+      var pairs = [['mandra','madhya'], ['madhya','taar']].filter(function(p){
+        return basePool.some(function(n){ return n.saptak === p[0]; }) &&
+               basePool.some(function(n){ return n.saptak === p[1]; });
+      });
+      if(pairs.length){
+        var pair = pairs[Math.floor(Math.random()*pairs.length)];
+        candidatePool = basePool.filter(function(n){ return n.saptak === pair[0] || n.saptak === pair[1]; });
+      } else {
+        candidatePool = basePool.slice();
+      }
+    } else {
+      candidatePool = basePool.slice();
+    }
+    var result = [];
+    for(var i=0;i<count;i++){
+      var candidate;
+      var guard = 0;
+      do{
+        candidate = candidatePool[Math.floor(Math.random()*candidatePool.length)];
+        guard++;
+      } while(result.length && candidate.midi === result[result.length-1].midi && candidatePool.length > 1 && guard < 20);
+      result.push(candidate);
+    }
+    return result;
+  }
+
+  function updateGameDisplay(){
+    sargamLabel.textContent = '?';
+    saptakTag.textContent = 'listen';
+    saptakTag.className = 'saptak-tag pause';
+    westernLabel.textContent = '';
+    positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + gameSequence.length;
+    modeToggle.style.display = 'block';
+    modeToggle.textContent = 'Find-the-note round · tap to stop';
+    timerLabel.textContent = settings.gameNoteDuration + 's';
+    setRing(0);
+  }
+
+  function updateGamePauseDisplay(){
+    sargamLabel.textContent = '·';
+    saptakTag.textContent = 'listen';
+    saptakTag.className = 'saptak-tag pause';
+    westernLabel.textContent = '';
+    positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + gameSequence.length;
+    timerLabel.textContent = settings.pauseDuration + 's';
+    setRing(1);
+  }
+
+  function startGameRound(){
+    stopPlayback();
+    mode = 'game';
+    ladderEl.style.display = 'none';
+    prevBtn.style.opacity = '0.35';
+    nextBtn.style.opacity = '0.35';
+    gameSequence = pickGameNotes(settings.gameLevel, settings.gameNoteCount);
+    currentIndex = 0;
+    phase = 'note';
+    elapsed = 0;
+    needsPrep = true;
+    updateGameDisplay();
+    play();
+  }
+
+  function exitGameMode(){
+    stopPlayback();
+    mode = 'sequence';
+    ladderEl.style.display = '';
+    prevBtn.style.opacity = '';
+    nextBtn.style.opacity = '';
+    phase = 'note';
+    elapsed = 0;
+    updateDisplay();
+  }
+
+  function finishGameRound(){
+    stopPlayback();
+    var listHtml = gameSequence.map(function(n){ return n.sargam + ' (' + n.western + ')'; }).join(' → ');
+    gameRevealText.textContent = listHtml;
+    gameRevealScreen.classList.add('show');
+  }
+
   function setRing(fraction){
     ringFill.style.strokeDashoffset = (CIRC * fraction).toFixed(2);
   }
@@ -740,6 +916,15 @@
   function ensureAudio(){
     if(!audioCtx){
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // A gentle limiter so the reference tone can be driven louder than
+      // unity gain without harsh digital clipping.
+      masterBus = audioCtx.createDynamicsCompressor();
+      masterBus.threshold.setValueAtTime(-8, audioCtx.currentTime);
+      masterBus.knee.setValueAtTime(6, audioCtx.currentTime);
+      masterBus.ratio.setValueAtTime(5, audioCtx.currentTime);
+      masterBus.attack.setValueAtTime(0.002, audioCtx.currentTime);
+      masterBus.release.setValueAtTime(0.15, audioCtx.currentTime);
+      masterBus.connect(audioCtx.destination);
     }
     if(audioCtx.state === 'suspended') audioCtx.resume();
   }
@@ -759,7 +944,7 @@
     var releaseStart = Math.max(now + attack, now + dur - release);
     toneGain.gain.setValueAtTime(vol, releaseStart);
     toneGain.gain.linearRampToValueAtTime(0, releaseStart + release);
-    toneOsc.connect(toneGain).connect(audioCtx.destination);
+    toneOsc.connect(toneGain).connect(masterBus);
     toneOsc.start(now);
     toneOsc.stop(now + dur + 0.02);
   }
@@ -783,7 +968,7 @@
     droneOsc.frequency.setValueAtTime(freq, audioCtx.currentTime);
     droneGain.gain.setValueAtTime(0, audioCtx.currentTime);
     droneGain.gain.linearRampToValueAtTime(settings.droneVolume, audioCtx.currentTime + 0.4);
-    droneOsc.connect(droneGain).connect(audioCtx.destination);
+    droneOsc.connect(droneGain).connect(masterBus);
     droneOsc.start();
   }
   function stopDrone(){
@@ -797,7 +982,10 @@
   }
 
   function getPhaseDuration(){
-    return phase === 'note' ? settings.duration : settings.pauseDuration;
+    if(phase === 'note'){
+      return mode === 'game' ? settings.gameNoteDuration : settings.duration;
+    }
+    return settings.pauseDuration;
   }
 
   function tick(now){
@@ -825,7 +1013,7 @@
     var duration = getPhaseDuration();
     var remaining = duration - elapsed;
     if(phase === 'note'){
-      var note = sequence[currentIndex];
+      var note = (mode === 'game') ? gameSequence[currentIndex] : sequence[currentIndex];
       startTone(note.freq, remaining, settings.refOn ? settings.refVolume : 0);
       if(settings.droneOn && !droneOsc) startDrone();
     } else {
@@ -836,8 +1024,20 @@
   }
 
   function phaseComplete(){
+    if(phase === 'prep'){
+      stopToneImmediate();
+      phase = 'note';
+      elapsed = 0;
+      if(mode === 'game'){ updateGameDisplay(); } else { updateDisplay(); }
+      if(isPlaying) playCurrentSegment();
+      return;
+    }
     if(mode === 'drill'){
       drillPhaseComplete();
+      return;
+    }
+    if(mode === 'game'){
+      gamePhaseComplete();
       return;
     }
     if(phase === 'note'){
@@ -893,12 +1093,44 @@
     }
   }
 
+  function gamePhaseComplete(){
+    stopToneImmediate();
+    if(phase === 'note'){
+      currentIndex++;
+      if(currentIndex >= gameSequence.length){
+        finishGameRound();
+        return;
+      }
+      if(settings.pauseDuration > 0){
+        phase = 'pause';
+        elapsed = 0;
+        updateGamePauseDisplay();
+        if(isPlaying) playCurrentSegment();
+      } else {
+        elapsed = 0;
+        updateGameDisplay();
+        if(isPlaying) playCurrentSegment();
+      }
+    } else {
+      phase = 'note';
+      elapsed = 0;
+      updateGameDisplay();
+      if(isPlaying) playCurrentSegment();
+    }
+  }
+
   function play(){
-    if(sequence.length === 0) return;
+    var len = (mode === 'game') ? gameSequence.length : sequence.length;
+    if(len === 0) return;
     isPlaying = true;
     breatheEl.classList.add('on');
     playBtn.textContent = '❚❚';
     playBtn.setAttribute('aria-label','Pause');
+    if(needsPrep && phase === 'note' && elapsed === 0){
+      phase = 'prep';
+      needsPrep = false;
+      updatePrepDisplay();
+    }
     playCurrentSegment();
   }
 
@@ -925,6 +1157,7 @@
   }
 
   function goTo(index){
+    if(mode === 'game') return;
     if(index < 0 || index >= sequence.length) return;
     var wasPlaying = isPlaying;
     stopPlayback();
@@ -972,12 +1205,73 @@
   });
   prevBtn.addEventListener('click', function(){ goTo(currentIndex - 1); });
   nextBtn.addEventListener('click', function(){ goTo(currentIndex + 1); });
-  modeToggle.addEventListener('click', exitDrillMode);
+  modeToggle.addEventListener('click', function(){
+    if(mode === 'drill') exitDrillMode();
+    else if(mode === 'game') exitGameMode();
+  });
 
   $('restartBtn').addEventListener('click', function(){
     completeScreen.classList.remove('show');
-    currentIndex = 0; phase = 'note'; elapsed = 0;
+    currentIndex = 0; phase = 'note'; elapsed = 0; needsPrep = true;
     updateDisplay();
+  });
+
+  // ---------- find-the-note game panel ----------
+  function openGamePanel(){ gamePanel.classList.add('show'); overlay.classList.add('show'); }
+  function closeGamePanel(){ gamePanel.classList.remove('show'); overlay.classList.remove('show'); }
+  $('gameBtn').addEventListener('click', openGamePanel);
+
+  var levelSeg = $('levelSeg');
+  Array.prototype.forEach.call(levelSeg.children, function(btn){
+    btn.classList.toggle('active', parseInt(btn.dataset.val,10) === settings.gameLevel);
+    btn.addEventListener('click', function(){
+      settings.gameLevel = parseInt(btn.dataset.val, 10);
+      Array.prototype.forEach.call(levelSeg.children, function(b){ b.classList.toggle('active', b === btn); });
+      saveSettings();
+    });
+  });
+
+  var countSeg = $('countSeg');
+  Array.prototype.forEach.call(countSeg.children, function(btn){
+    btn.classList.toggle('active', parseInt(btn.dataset.val,10) === settings.gameNoteCount);
+    btn.addEventListener('click', function(){
+      settings.gameNoteCount = parseInt(btn.dataset.val, 10);
+      Array.prototype.forEach.call(countSeg.children, function(b){ b.classList.toggle('active', b === btn); });
+      saveSettings();
+    });
+  });
+
+  var gameDurationRange = $('gameDurationRange');
+  var gameDurationVal = $('gameDurationVal');
+  gameDurationRange.value = settings.gameNoteDuration;
+  gameDurationVal.textContent = settings.gameNoteDuration + 's';
+  gameDurationRange.addEventListener('input', function(){
+    settings.gameNoteDuration = parseInt(this.value, 10);
+    gameDurationVal.textContent = settings.gameNoteDuration + 's';
+    saveSettings();
+  });
+
+  $('startGameBtn').addEventListener('click', function(){
+    closeGamePanel();
+    startGameRound();
+  });
+
+  $('gameReplayBtn').addEventListener('click', function(){
+    gameRevealScreen.classList.remove('show');
+    currentIndex = 0; phase = 'note'; elapsed = 0; needsPrep = true;
+    updateGameDisplay();
+    play();
+  });
+  $('gameNewRoundBtn').addEventListener('click', function(){
+    gameRevealScreen.classList.remove('show');
+    gameSequence = pickGameNotes(settings.gameLevel, settings.gameNoteCount);
+    currentIndex = 0; phase = 'note'; elapsed = 0; needsPrep = true;
+    updateGameDisplay();
+    play();
+  });
+  $('gameExitBtn').addEventListener('click', function(){
+    gameRevealScreen.classList.remove('show');
+    exitGameMode();
   });
 
   // ---------- settings panel ----------
@@ -987,7 +1281,7 @@
   function closeSettingsFn(){ settingsPanel.classList.remove('show'); overlay.classList.remove('show'); }
   $('settingsBtn').addEventListener('click', openSettings);
   $('closeSettings').addEventListener('click', closeSettingsFn);
-  overlay.addEventListener('click', closeSettingsFn);
+  overlay.addEventListener('click', function(){ closeSettingsFn(); closeGamePanel(); });
 
   var saSelect = $('saSelect');
   saSelect.value = settings.saMidi;

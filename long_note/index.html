@@ -407,6 +407,132 @@
     font-size:14px;
     cursor:pointer;
   }
+  .tune-view{
+    display:none;
+    flex-direction:column;
+    gap:8px;
+    padding:10px 22px 16px;
+    max-height:150px;
+    overflow-y:auto;
+  }
+  .tune-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+  .tune-chip{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px;
+    padding:4px 9px;
+    border-radius:7px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+  }
+  .tune-chip.mandra{color:var(--teal);}
+  .tune-chip.madhya{color:var(--brass);}
+  .tune-chip.taar{color:var(--rust);}
+  .tune-chip.rest{color:var(--ink-dim); font-style:italic;}
+  .tune-chip.active{
+    background:var(--brass-soft);
+    border-color:var(--brass);
+    color:var(--ink);
+    font-weight:600;
+  }
+  .phrase-list{
+    display:none;
+    flex-direction:column;
+    gap:6px;
+    padding:10px 22px 16px;
+    max-height:180px;
+    overflow-y:auto;
+  }
+  .phrase-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding:9px 13px;
+    border-radius:10px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .phrase-row .p-label{
+    font-weight:500;
+    color:var(--ink-dim);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .phrase-row .p-time{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    color:var(--ink-dim);
+    flex:0 0 auto;
+  }
+  .phrase-row.active{
+    background:var(--brass-soft);
+    border-color:var(--brass);
+  }
+  .phrase-row.active .p-label{
+    color:var(--ink);
+    font-weight:600;
+  }
+  .bead-row{
+    display:flex;
+    justify-content:center;
+    gap:6px;
+    margin-top:12px;
+  }
+  .bead-row .pip{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--ring-track);
+  }
+  .bead-row .pip.filled{ background:var(--brass); }
+  .rounds-label{
+    text-align:center;
+    font-size:11.5px;
+    color:var(--ink-dim);
+    margin-top:6px;
+  }
+  .tune-textarea{
+    width:100%;
+    background:var(--surface-2);
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px;
+    line-height:1.6;
+    resize:vertical;
+  }
+  .field-hint{
+    font-size:11.5px;
+    color:var(--ink-dim);
+    margin-top:8px;
+    line-height:1.5;
+  }
+  input[type=file]{
+    width:100%;
+    color:var(--ink-dim);
+    font-size:13px;
+    padding:4px 0;
+  }
+  input[type=file]::file-selector-button{
+    background:var(--surface-2);
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 14px;
+    margin-right:10px;
+    cursor:pointer;
+    font-family:inherit;
+    font-size:13px;
+  }
 </style>
 </head>
 <body>
@@ -418,12 +544,18 @@
       <span class="brand-sub">bansuri practice · Sa = <span id="saLabel">E</span></span>
     </div>
     <div class="topbar-actions">
+      <button class="icon-btn" id="tuneBtn" aria-label="Practice a tune">🎼</button>
+      <button class="icon-btn" id="phrasesBtn" aria-label="Practice phrases from a manifest">🔂</button>
       <button class="icon-btn" id="gameBtn" aria-label="Find the note practice">🎯</button>
       <button class="icon-btn" id="settingsBtn" aria-label="Open settings">⚙</button>
     </div>
   </div>
 
   <div class="ladder" id="ladder"></div>
+  <div class="tune-view" id="tuneView"></div>
+  <audio id="tuneAudioEl" style="display:none;"></audio>
+  <audio id="phraseAudioEl" style="display:none;"></audio>
+  <div class="phrase-list" id="phraseListEl"></div>
 
   <div class="stage">
     <div class="ring-wrap">
@@ -441,6 +573,8 @@
     </div>
     <div class="position" id="positionLabel">Note 1 of 15</div>
     <div class="mode-toggle" id="modeToggle"></div>
+    <div class="bead-row" id="beadRow" style="display:none;"></div>
+    <div class="rounds-label" id="roundsLabel"></div>
   </div>
 
   <div class="controls">
@@ -526,6 +660,64 @@
   <button class="done-btn" id="closeSettings">Done</button>
 </div>
 
+<div class="settings-panel" id="tunePanel">
+  <h3>Practice a Tune</h3>
+
+  <div class="field">
+    <label>Upload a recording</label>
+    <input type="file" id="tuneAudioInput" accept="audio/*,.ogg,.oga,.opus,.m4a,.caf,.wav,.mp3,.aac">
+    <div class="field-hint" id="tuneAudioStatus">No recording uploaded yet</div>
+    <div class="field-hint">Works with Apple Voice Memos (.m4a), .mp3, .wav, and .ogg (Ogg may not play in Safari/iOS — if it fails, re-export as .m4a or .mp3).</div>
+  </div>
+
+  <div class="field" id="tuneAudioControlsField" style="display:none;">
+    <label>Playback speed <span class="val" id="tuneRateVal">1.00×</span></label>
+    <input type="range" id="tuneRateRange" min="0.5" max="1.25" step="0.05" value="1">
+    <div class="toggle-row" style="margin-top:14px;">
+      <span>Loop recording</span>
+      <div class="switch on" id="tuneLoopToggle"><div class="knob"></div></div>
+    </div>
+    <button class="done-btn" id="startTuneAudioBtn" style="margin-top:16px;">Practice with this recording</button>
+    <button class="btn-outline" id="removeTuneBtn" style="margin-top:10px; width:100%;">Remove uploaded tune</button>
+  </div>
+
+  <div class="field-hint" style="margin-bottom:14px;">— or type Sargam notation instead —</div>
+
+  <div class="field">
+    <label>Notation</label>
+    <textarea class="tune-textarea" id="tuneTextarea" rows="6" placeholder="P D S R G R R S&#10;P D S R G R R S&#10;M G R S"></textarea>
+    <div class="field-hint">
+      S R G M P D N = shuddha · lowercase r g d n = komal · lowercase m = tivra Ma · trailing ' = one octave up (S') · leading _ = one octave down (_P) · dash - = rest · new line = new phrase
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Seconds per note <span class="val" id="tuneDurationVal">1s</span></label>
+    <input type="range" id="tuneDurationRange" min="0.25" max="4" step="0.25" value="1">
+  </div>
+
+  <button class="done-btn" id="loadTuneBtn">Load typed notation</button>
+</div>
+
+<div class="settings-panel" id="phrasesPanel">
+  <h3>Practice Phrases</h3>
+
+  <div class="field">
+    <label>Trimmed audio</label>
+    <input type="file" id="phraseAudioInput" accept="audio/*,.ogg,.oga,.opus,.m4a,.caf,.wav,.mp3,.aac">
+  </div>
+
+  <div class="field">
+    <label>Manifest (.json)</label>
+    <input type="file" id="phraseManifestInput" accept=".json,application/json">
+  </div>
+
+  <div class="field-hint" id="phraseStatus">No phrases loaded yet</div>
+
+  <button class="done-btn" id="startPhrasesBtn" style="display:none; margin-top:6px;">Practice these phrases</button>
+  <button class="btn-outline" id="removePhrasesBtn" style="display:none; width:100%; margin-top:10px;">Remove uploaded phrases</button>
+</div>
+
 <div class="settings-panel" id="gamePanel">
   <h3>Find the Note</h3>
 
@@ -603,7 +795,45 @@
     var western = WESTERN_NAMES[mod12(midi)] + (Math.floor(midi/12) - 1);
     var sargam = DEGREE_NAMES[mod12(o)];
     var saptak = o < 0 ? 'mandra' : (o < 12 ? 'madhya' : 'taar');
-    return { midi: midi, freq: freq, western: western, sargam: sargam, saptak: saptak, offset: o };
+    return { midi: midi, freq: freq, western: western, sargam: sargam, saptak: saptak, offset: o, isRest: false };
+  }
+
+  var SHORT_SYMBOLS = ['S','r','R','g','G','M','m','P','d','D','n','N'];
+  var LETTER_TO_DEGREE = { S:0, s:0, r:1, R:2, g:3, G:4, M:5, m:6, P:7, p:7, d:8, D:9, n:10, N:11 };
+
+  function shortSymbol(note){
+    var sym = SHORT_SYMBOLS[mod12(note.offset)];
+    if(note.saptak === 'taar') return sym + '\u0307';
+    if(note.saptak === 'mandra') return sym + '\u0323';
+    return sym;
+  }
+
+  function parseToken(tok){
+    if(tok === '-' || tok === '\u2013' || tok === '.'){ return { isRest: true }; }
+    var m = tok.match(/^(_*)([SsRrGgMmPpDdNn])('*)$/);
+    if(!m) return null;
+    var under = m[1].length;
+    var deg = LETTER_TO_DEGREE[m[2]];
+    if(deg === undefined) return null;
+    var apostrophes = m[3].length;
+    var offset = deg + 12*apostrophes - 12*under;
+    return noteFromOffset(settings.saMidi, offset);
+  }
+
+  function parseNotation(text){
+    var lines = text.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+    var flat = [];
+    var lineTokensArr = [];
+    lines.forEach(function(line){
+      var rawTokens = line.split(/[\s,]+/).filter(Boolean);
+      var lineTokens = [];
+      rawTokens.forEach(function(tok){
+        var parsed = parseToken(tok);
+        if(parsed){ lineTokens.push(parsed); flat.push(parsed); }
+      });
+      if(lineTokens.length) lineTokensArr.push(lineTokens);
+    });
+    return { flat: flat, lines: lineTokensArr };
   }
 
   function buildSequence(saMidi, chromatic){
@@ -640,6 +870,10 @@
     gameOctave: 'madhya',
     gameNoteCount: 2,
     gameNoteDuration: 3,
+    tuneNoteDuration: 1,
+    tuneText: '',
+    tuneLoop: true,
+    tunePlaybackRate: 1,
     refOn: true,
     refVolume: 1.4,
     droneOn: false,
@@ -664,10 +898,19 @@
   var sequence = [];
   var currentIndex = 0;
   var phase = 'note'; // 'note' | 'pause' | 'prep'
-  var mode = 'sequence'; // 'sequence' | 'drill' | 'game'
+  var mode = 'sequence'; // 'sequence' | 'drill' | 'game' | 'tune' | 'tuneAudio' | 'phrases'
   var drillRepCount = 0;
   var needsPrep = true;
   var gameSequence = [];
+  var tuneSequence = [];
+  var tuneChipEls = [];
+  var currentTuneObjectUrl = null;
+  var phraseManifest = [];
+  var currentPhraseIndex = 0;
+  var phraseRepCount = 0;
+  var currentPhraseObjectUrl = null;
+  var pendingPhraseAudio = null;
+  var pendingPhraseSegments = null;
   var elapsed = 0;
   var isPlaying = false;
   var playStartTs = 0;
@@ -677,6 +920,7 @@
   var toneOsc = null, toneGain = null;
   var droneOsc = null, droneGain = null;
   var masterBus = null;
+  var wakeLock = null;
 
   // ---------- DOM ----------
   var $ = function(id){ return document.getElementById(id); };
@@ -695,9 +939,17 @@
   var streakEl = $('streak');
   var completeScreen = $('completeScreen');
   var modeToggle = $('modeToggle');
+  var beadRow = $('beadRow');
+  var roundsLabel = $('roundsLabel');
   var gamePanel = $('gamePanel');
   var gameRevealScreen = $('gameRevealScreen');
   var gameRevealText = $('gameRevealText');
+  var tunePanel = $('tunePanel');
+  var tuneViewEl = $('tuneView');
+  var tuneAudioEl = $('tuneAudioEl');
+  var phrasesPanel = $('phrasesPanel');
+  var phraseListEl = $('phraseListEl');
+  var phraseAudioEl = $('phraseAudioEl');
 
   var CIRC = 2 * Math.PI * 90;
 
@@ -706,12 +958,21 @@
     sequence = applyOrder(base, settings.order);
     if(resetPlayback){
       stopPlayback();
+      tuneAudioEl.pause();
+      phraseAudioEl.pause();
       currentIndex = 0;
       phase = 'note';
       mode = 'sequence';
       drillRepCount = 0;
       needsPrep = true;
       elapsed = 0;
+      ladderEl.style.display = '';
+      tuneViewEl.style.display = 'none';
+      phraseListEl.style.display = 'none';
+      beadRow.style.display = 'none';
+      roundsLabel.textContent = '';
+      prevBtn.style.opacity = '';
+      nextBtn.style.opacity = '';
     }
     renderLadder();
     updateDisplay();
@@ -762,6 +1023,8 @@
   function updateDisplay(){
     var note = sequence[currentIndex];
     if(!note) return;
+    beadRow.style.display = 'none';
+    roundsLabel.textContent = '';
     sargamLabel.textContent = note.sargam;
     westernLabel.textContent = note.western + ' · ' + note.freq.toFixed(1) + ' Hz';
     saptakTag.textContent = note.saptak;
@@ -819,12 +1082,379 @@
       positionLabel.textContent = 'Round starts in ' + settings.pauseDuration + 's';
       modeToggle.style.display = 'block';
       modeToggle.textContent = 'Find-the-note round · tap to stop';
+    } else if(mode === 'tune'){
+      var firstNote = tuneSequence[currentIndex];
+      westernLabel.textContent = (firstNote && !firstNote.isRest) ? ('first: ' + firstNote.sargam + ' · ' + firstNote.western) : '';
+      positionLabel.textContent = 'Tune starts in ' + settings.pauseDuration + 's';
+      modeToggle.style.display = 'block';
+      modeToggle.textContent = 'Practicing your tune · tap to exit';
     } else {
       var note = sequence[currentIndex];
       westernLabel.textContent = note ? ('first: ' + note.sargam + ' · ' + note.western) : '';
       renderPositionLabel();
       renderModeToggle();
     }
+  }
+
+  // ---------- tune practice ----------
+  function renderTuneView(parsed){
+    tuneViewEl.innerHTML = '';
+    tuneChipEls = [];
+    parsed.lines.forEach(function(lineTokens){
+      var rowEl = document.createElement('div');
+      rowEl.className = 'tune-row';
+      lineTokens.forEach(function(tok){
+        var chip = document.createElement('span');
+        chip.className = 'tune-chip ' + (tok.isRest ? 'rest' : tok.saptak);
+        chip.textContent = tok.isRest ? '–' : shortSymbol(tok);
+        rowEl.appendChild(chip);
+        tuneChipEls.push(chip);
+      });
+      tuneViewEl.appendChild(rowEl);
+    });
+  }
+
+  function highlightTuneChip(i){
+    tuneChipEls.forEach(function(chip, idx){ chip.classList.toggle('active', idx === i); });
+    var active = tuneChipEls[i];
+    if(active) active.scrollIntoView({ behavior:'smooth', inline:'center', block:'nearest' });
+  }
+
+  function updateTuneDisplay(){
+    var note = tuneSequence[currentIndex];
+    if(!note) return;
+    beadRow.style.display = 'none';
+    roundsLabel.textContent = '';
+    if(note.isRest){
+      sargamLabel.textContent = '–';
+      saptakTag.textContent = 'rest';
+      saptakTag.className = 'saptak-tag pause';
+      westernLabel.textContent = '';
+    } else {
+      sargamLabel.textContent = note.sargam;
+      westernLabel.textContent = note.western + ' · ' + note.freq.toFixed(1) + ' Hz';
+      saptakTag.textContent = note.saptak;
+      saptakTag.className = 'saptak-tag ' + note.saptak;
+    }
+    positionLabel.textContent = 'Note ' + (currentIndex+1) + ' of ' + tuneSequence.length;
+    modeToggle.style.display = 'block';
+    modeToggle.textContent = 'Practicing your tune · tap to exit';
+    timerLabel.textContent = settings.tuneNoteDuration + 's';
+    setRing(0);
+    highlightTuneChip(currentIndex);
+  }
+
+  function startTunePractice(parsed){
+    stopPlayback();
+    mode = 'tune';
+    tuneSequence = parsed.flat;
+    ladderEl.style.display = 'none';
+    tuneViewEl.style.display = 'flex';
+    prevBtn.style.opacity = '';
+    nextBtn.style.opacity = '';
+    renderTuneView(parsed);
+    currentIndex = 0;
+    phase = 'note';
+    elapsed = 0;
+    needsPrep = true;
+    updateTuneDisplay();
+  }
+
+  function exitTuneMode(){
+    stopPlayback();
+    mode = 'sequence';
+    ladderEl.style.display = '';
+    tuneViewEl.style.display = 'none';
+    phase = 'note';
+    elapsed = 0;
+    updateDisplay();
+  }
+
+  function finishTune(){
+    stopPlayback();
+    currentIndex = 0;
+    phase = 'note';
+    elapsed = 0;
+    needsPrep = true;
+    updateTuneDisplay();
+    positionLabel.textContent = 'Tune complete · tap ▶ to replay';
+  }
+
+  // ---------- uploaded-recording tune practice ----------
+  var TUNE_DB_NAME = 'longtone_tunes';
+  var TUNE_STORE = 'files';
+
+  function openTuneDB(){
+    return new Promise(function(resolve, reject){
+      if(!('indexedDB' in window)){ reject(new Error('no indexeddb')); return; }
+      var req = indexedDB.open(TUNE_DB_NAME, 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore(TUNE_STORE); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  }
+  function saveTuneBlob(blob, name){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readwrite');
+        tx.objectStore(TUNE_STORE).put({ blob: blob, name: name }, 'current');
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+  function loadTuneBlob(){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readonly');
+        var req = tx.objectStore(TUNE_STORE).get('current');
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+  function clearTuneBlob(){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readwrite');
+        tx.objectStore(TUNE_STORE).delete('current');
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function formatTime(s){
+    if(!isFinite(s) || s < 0) s = 0;
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  function activateTuneAudio(blob, name){
+    if(currentTuneObjectUrl) URL.revokeObjectURL(currentTuneObjectUrl);
+    currentTuneObjectUrl = URL.createObjectURL(blob);
+    tuneAudioEl.src = currentTuneObjectUrl;
+    tuneAudioEl.loop = settings.tuneLoop;
+    tuneAudioEl.playbackRate = settings.tunePlaybackRate;
+    $('tuneAudioStatus').textContent = 'Loaded: ' + name;
+    $('tuneAudioControlsField').style.display = 'block';
+  }
+
+  function loadTuneFile(file){
+    $('tuneAudioStatus').textContent = 'Loading ' + file.name + '…';
+    saveTuneBlob(file, file.name).catch(function(){});
+    activateTuneAudio(file, file.name);
+  }
+
+  function startTuneAudioMode(){
+    stopPlayback();
+    mode = 'tuneAudio';
+    ladderEl.style.display = 'none';
+    tuneViewEl.style.display = 'none';
+    prevBtn.style.opacity = '';
+    nextBtn.style.opacity = '';
+    updateTuneAudioDisplay();
+  }
+
+  function exitTuneAudioMode(){
+    tuneAudioEl.pause();
+    mode = 'sequence';
+    ladderEl.style.display = '';
+    phase = 'note';
+    elapsed = 0;
+    updateDisplay();
+  }
+
+  function updateTuneAudioDisplay(){
+    var dur = tuneAudioEl.duration;
+    beadRow.style.display = 'none';
+    roundsLabel.textContent = '';
+    sargamLabel.textContent = '♪';
+    saptakTag.textContent = 'your recording';
+    saptakTag.className = 'saptak-tag pause';
+    westernLabel.textContent = formatTime(tuneAudioEl.currentTime) + ' / ' + formatTime(dur);
+    var statusText = $('tuneAudioStatus').textContent.replace(/^Loaded:\s*/, '').replace(/^Loading.*/, 'your recording');
+    positionLabel.textContent = statusText;
+    modeToggle.style.display = 'block';
+    modeToggle.textContent = 'Practicing your recording · tap to exit';
+    timerLabel.textContent = '';
+    setRing(dur ? (tuneAudioEl.currentTime / dur) : 0);
+  }
+
+  // ---------- phrase-manifest practice ----------
+  function firstNumber(vals){
+    for(var i=0;i<vals.length;i++){
+      var v = vals[i];
+      if(typeof v === 'number' && isFinite(v)) return v;
+      if(typeof v === 'string' && v.trim() !== '' && isFinite(parseFloat(v))) return parseFloat(v);
+    }
+    return null;
+  }
+
+  function parsePhraseManifest(jsonText){
+    var data;
+    try{ data = JSON.parse(jsonText); }catch(e){ return []; }
+    var arr = null;
+    if(Array.isArray(data)){
+      arr = data;
+    } else if(data && typeof data === 'object'){
+      var candidates = ['segments','phrases','clips','items','parts','markers'];
+      for(var i=0;i<candidates.length;i++){
+        if(Array.isArray(data[candidates[i]])){ arr = data[candidates[i]]; break; }
+      }
+      if(!arr){
+        for(var key in data){
+          if(Array.isArray(data[key])){ arr = data[key]; break; }
+        }
+      }
+    }
+    if(!arr) return [];
+    var segs = [];
+    arr.forEach(function(item, i){
+      if(!item || typeof item !== 'object') return;
+      var start = firstNumber([item.start, item.start_time, item.startTime, item.begin, item.from, item.t0]);
+      var end = firstNumber([item.end, item.end_time, item.endTime, item.stop, item.to, item.t1]);
+      if(start === null || end === null || end <= start) return;
+      var label = item.label || item.name || item.title || item.phrase || ('Phrase ' + (i+1));
+      segs.push({ label: String(label), start: start, end: end });
+    });
+    segs.sort(function(a,b){ return a.start - b.start; });
+    return segs;
+  }
+
+  function savePhraseData(blob, name, segments){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readwrite');
+        tx.objectStore(TUNE_STORE).put({ blob: blob, name: name, segments: segments }, 'phrases');
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+  function loadPhraseData(){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readonly');
+        var req = tx.objectStore(TUNE_STORE).get('phrases');
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+  function clearPhraseData(){
+    return openTuneDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(TUNE_STORE, 'readwrite');
+        tx.objectStore(TUNE_STORE).delete('phrases');
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function activatePhraseData(blob, name, segments){
+    if(currentPhraseObjectUrl) URL.revokeObjectURL(currentPhraseObjectUrl);
+    currentPhraseObjectUrl = URL.createObjectURL(blob);
+    phraseAudioEl.src = currentPhraseObjectUrl;
+    phraseManifest = segments;
+  }
+
+  function renderPhraseList(){
+    phraseListEl.innerHTML = '';
+    phraseManifest.forEach(function(seg, i){
+      var row = document.createElement('div');
+      row.className = 'phrase-row' + (i === currentPhraseIndex ? ' active' : '');
+      var labelSpan = document.createElement('span');
+      labelSpan.className = 'p-label';
+      labelSpan.textContent = (i+1) + '. ' + seg.label;
+      var timeSpan = document.createElement('span');
+      timeSpan.className = 'p-time';
+      timeSpan.textContent = formatTime(seg.start) + '–' + formatTime(seg.end);
+      row.appendChild(labelSpan);
+      row.appendChild(timeSpan);
+      row.addEventListener('click', function(){
+        var wasPlaying = !phraseAudioEl.paused;
+        selectPhrase(i);
+        if(wasPlaying) phraseAudioEl.play();
+      });
+      phraseListEl.appendChild(row);
+    });
+  }
+
+  function renderBeadTally(){
+    beadRow.style.display = 'flex';
+    beadRow.innerHTML = '';
+    var round = phraseRepCount % 10;
+    for(var i=0;i<10;i++){
+      var d = document.createElement('div');
+      d.className = 'pip' + (i < round ? ' filled' : '');
+      beadRow.appendChild(d);
+    }
+    var rounds = Math.floor(phraseRepCount / 10);
+    roundsLabel.textContent = rounds > 0 ? ('Round ' + rounds) : '';
+  }
+
+  function updatePhraseDisplay(){
+    var seg = phraseManifest[currentPhraseIndex];
+    if(!seg) return;
+    sargamLabel.textContent = String(currentPhraseIndex + 1);
+    saptakTag.textContent = 'looping phrase';
+    saptakTag.className = 'saptak-tag pause';
+    westernLabel.textContent = seg.label + ' · ' + formatTime(seg.start) + '–' + formatTime(seg.end);
+    positionLabel.textContent = 'Phrase ' + (currentPhraseIndex+1) + ' of ' + phraseManifest.length + ' · Loop ' + phraseRepCount;
+    modeToggle.style.display = 'block';
+    modeToggle.textContent = 'Practicing phrases · tap to exit';
+    timerLabel.textContent = '';
+    setRing(0);
+    renderBeadTally();
+    updateActivePhraseRow();
+  }
+
+  function updateActivePhraseRow(){
+    var rows = phraseListEl.children;
+    for(var i=0;i<rows.length;i++){
+      rows[i].classList.toggle('active', i === currentPhraseIndex);
+    }
+    var active = rows[currentPhraseIndex];
+    if(active) active.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+
+  function selectPhrase(i){
+    if(i < 0 || i >= phraseManifest.length) return;
+    currentPhraseIndex = i;
+    phraseRepCount = 0;
+    phraseAudioEl.currentTime = phraseManifest[i].start;
+    updatePhraseDisplay();
+  }
+
+  function startPhrasePractice(){
+    stopPlayback();
+    tuneAudioEl.pause();
+    mode = 'phrases';
+    ladderEl.style.display = 'none';
+    tuneViewEl.style.display = 'none';
+    phraseListEl.style.display = 'flex';
+    prevBtn.style.opacity = '';
+    nextBtn.style.opacity = '';
+    currentPhraseIndex = 0;
+    phraseRepCount = 0;
+    if(phraseManifest[0]) phraseAudioEl.currentTime = phraseManifest[0].start;
+    renderPhraseList();
+    updatePhraseDisplay();
+  }
+
+  function exitPhraseMode(){
+    phraseAudioEl.pause();
+    mode = 'sequence';
+    ladderEl.style.display = '';
+    phraseListEl.style.display = 'none';
+    beadRow.style.display = 'none';
+    roundsLabel.textContent = '';
+    phase = 'note';
+    elapsed = 0;
+    updateDisplay();
   }
 
   // ---------- "find the note" game ----------
@@ -863,6 +1493,8 @@
   }
 
   function updateGameDisplay(){
+    beadRow.style.display = 'none';
+    roundsLabel.textContent = '';
     sargamLabel.textContent = '?';
     saptakTag.textContent = 'listen';
     saptakTag.className = 'saptak-tag pause';
@@ -937,6 +1569,27 @@
     if(audioCtx.state === 'suspended') audioCtx.resume();
   }
 
+  // Keeps the screen from auto-locking mid-session (iOS 16.4+, Android Chrome).
+  // No-op with no error on browsers/devices that don't support it.
+  function requestWakeLock(){
+    if(!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function(lock){
+      wakeLock = lock;
+    }).catch(function(){});
+  }
+  function releaseWakeLock(){
+    if(wakeLock){
+      wakeLock.release().catch(function(){});
+      wakeLock = null;
+    }
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && !wakeLock){
+      var stillPlaying = isPlaying || (!tuneAudioEl.paused) || (!phraseAudioEl.paused);
+      if(stillPlaying) requestWakeLock();
+    }
+  });
+
   function startTone(freq, dur, vol){
     stopToneImmediate();
     if(!settings.refOn || vol <= 0) return;
@@ -991,7 +1644,9 @@
 
   function getPhaseDuration(){
     if(phase === 'note'){
-      return mode === 'game' ? settings.gameNoteDuration : settings.duration;
+      if(mode === 'game') return settings.gameNoteDuration;
+      if(mode === 'tune') return settings.tuneNoteDuration;
+      return settings.duration;
     }
     return settings.pauseDuration;
   }
@@ -1021,9 +1676,13 @@
     var duration = getPhaseDuration();
     var remaining = duration - elapsed;
     if(phase === 'note'){
-      var note = (mode === 'game') ? gameSequence[currentIndex] : sequence[currentIndex];
-      startTone(note.freq, remaining, settings.refOn ? settings.refVolume : 0);
-      if(settings.droneOn && !droneOsc) startDrone();
+      var note = (mode === 'game') ? gameSequence[currentIndex] : (mode === 'tune' ? tuneSequence[currentIndex] : sequence[currentIndex]);
+      if(note && !note.isRest){
+        startTone(note.freq, remaining, settings.refOn ? settings.refVolume : 0);
+        if(settings.droneOn && !droneOsc) startDrone();
+      } else {
+        stopToneImmediate();
+      }
     } else {
       stopToneImmediate();
     }
@@ -1036,7 +1695,9 @@
       stopToneImmediate();
       phase = 'note';
       elapsed = 0;
-      if(mode === 'game'){ updateGameDisplay(); } else { updateDisplay(); }
+      if(mode === 'game'){ updateGameDisplay(); }
+      else if(mode === 'tune'){ updateTuneDisplay(); }
+      else { updateDisplay(); }
       if(isPlaying) playCurrentSegment();
       return;
     }
@@ -1046,6 +1707,10 @@
     }
     if(mode === 'game'){
       gamePhaseComplete();
+      return;
+    }
+    if(mode === 'tune'){
+      tunePhaseComplete();
       return;
     }
     if(phase === 'note'){
@@ -1061,6 +1726,18 @@
     } else {
       goToNextIndex();
     }
+  }
+
+  function tunePhaseComplete(){
+    stopToneImmediate();
+    currentIndex++;
+    if(currentIndex >= tuneSequence.length){
+      finishTune();
+      return;
+    }
+    elapsed = 0;
+    updateTuneDisplay();
+    if(isPlaying) playCurrentSegment();
   }
 
   function goToNextIndex(){
@@ -1128,12 +1805,13 @@
   }
 
   function play(){
-    var len = (mode === 'game') ? gameSequence.length : sequence.length;
+    var len = (mode === 'game') ? gameSequence.length : (mode === 'tune' ? tuneSequence.length : sequence.length);
     if(len === 0) return;
     isPlaying = true;
     breatheEl.classList.add('on');
     playBtn.textContent = '❚❚';
     playBtn.setAttribute('aria-label','Pause');
+    requestWakeLock();
     if(needsPrep && phase === 'note' && elapsed === 0){
       phase = 'prep';
       needsPrep = false;
@@ -1153,6 +1831,7 @@
     if(rafId) cancelAnimationFrame(rafId);
     stopToneImmediate();
     stopDrone();
+    releaseWakeLock();
   }
 
   function stopPlayback(){
@@ -1162,18 +1841,20 @@
     if(rafId) cancelAnimationFrame(rafId);
     stopToneImmediate();
     stopDrone();
+    releaseWakeLock();
   }
 
   function goTo(index){
     if(mode === 'game') return;
-    if(index < 0 || index >= sequence.length) return;
+    var len = (mode === 'tune') ? tuneSequence.length : sequence.length;
+    if(index < 0 || index >= len) return;
     var wasPlaying = isPlaying;
     stopPlayback();
     currentIndex = index;
     phase = 'note';
     elapsed = 0;
     if(mode === 'drill') drillRepCount = 0;
-    updateDisplay();
+    if(mode === 'tune'){ updateTuneDisplay(); } else { updateDisplay(); }
     if(wasPlaying) play();
   }
 
@@ -1209,13 +1890,106 @@
 
   // ---------- controls ----------
   playBtn.addEventListener('click', function(){
+    if(mode === 'tuneAudio'){
+      if(tuneAudioEl.paused) tuneAudioEl.play(); else tuneAudioEl.pause();
+      return;
+    }
+    if(mode === 'phrases'){
+      if(phraseAudioEl.paused) phraseAudioEl.play(); else phraseAudioEl.pause();
+      return;
+    }
     if(isPlaying) pause(); else play();
   });
-  prevBtn.addEventListener('click', function(){ goTo(currentIndex - 1); });
-  nextBtn.addEventListener('click', function(){ goTo(currentIndex + 1); });
+  prevBtn.addEventListener('click', function(){
+    if(mode === 'tuneAudio'){ tuneAudioEl.currentTime = Math.max(0, tuneAudioEl.currentTime - 5); return; }
+    if(mode === 'phrases'){
+      var wasPlaying = !phraseAudioEl.paused;
+      selectPhrase(Math.max(0, currentPhraseIndex - 1));
+      renderPhraseList();
+      if(wasPlaying) phraseAudioEl.play();
+      return;
+    }
+    goTo(currentIndex - 1);
+  });
+  nextBtn.addEventListener('click', function(){
+    if(mode === 'tuneAudio'){ tuneAudioEl.currentTime = Math.min(tuneAudioEl.duration || 0, tuneAudioEl.currentTime + 5); return; }
+    if(mode === 'phrases'){
+      var wasPlaying = !phraseAudioEl.paused;
+      selectPhrase(Math.min(phraseManifest.length - 1, currentPhraseIndex + 1));
+      renderPhraseList();
+      if(wasPlaying) phraseAudioEl.play();
+      return;
+    }
+    goTo(currentIndex + 1);
+  });
   modeToggle.addEventListener('click', function(){
     if(mode === 'drill') exitDrillMode();
     else if(mode === 'game') exitGameMode();
+    else if(mode === 'tune') exitTuneMode();
+    else if(mode === 'tuneAudio') exitTuneAudioMode();
+    else if(mode === 'phrases') exitPhraseMode();
+  });
+
+  tuneAudioEl.addEventListener('play', function(){
+    if(mode !== 'tuneAudio') return;
+    playBtn.textContent = '❚❚';
+    playBtn.setAttribute('aria-label', 'Pause');
+    breatheEl.classList.add('on');
+    requestWakeLock();
+  });
+  tuneAudioEl.addEventListener('pause', function(){
+    if(mode !== 'tuneAudio') return;
+    playBtn.textContent = '▶';
+    playBtn.setAttribute('aria-label', 'Play');
+    breatheEl.classList.remove('on');
+    releaseWakeLock();
+  });
+  tuneAudioEl.addEventListener('timeupdate', function(){
+    if(mode === 'tuneAudio') updateTuneAudioDisplay();
+  });
+  tuneAudioEl.addEventListener('loadedmetadata', function(){
+    if(mode === 'tuneAudio') updateTuneAudioDisplay();
+  });
+  tuneAudioEl.addEventListener('ended', function(){
+    if(mode === 'tuneAudio' && !tuneAudioEl.loop){
+      positionLabel.textContent = 'Recording finished · tap ▶ to replay';
+    }
+  });
+  tuneAudioEl.addEventListener('error', function(){
+    $('tuneAudioStatus').textContent = "Couldn't play this file — try exporting it as .m4a or .mp3 instead.";
+    $('tuneAudioControlsField').style.display = 'none';
+  });
+
+  phraseAudioEl.addEventListener('play', function(){
+    if(mode !== 'phrases') return;
+    playBtn.textContent = '❚❚';
+    playBtn.setAttribute('aria-label', 'Pause');
+    breatheEl.classList.add('on');
+    requestWakeLock();
+  });
+  phraseAudioEl.addEventListener('pause', function(){
+    if(mode !== 'phrases') return;
+    playBtn.textContent = '▶';
+    playBtn.setAttribute('aria-label', 'Play');
+    breatheEl.classList.remove('on');
+    releaseWakeLock();
+  });
+  phraseAudioEl.addEventListener('timeupdate', function(){
+    if(mode !== 'phrases') return;
+    var seg = phraseManifest[currentPhraseIndex];
+    if(!seg) return;
+    if(phraseAudioEl.currentTime >= seg.end - 0.03){
+      phraseRepCount++;
+      phraseAudioEl.currentTime = seg.start;
+      positionLabel.textContent = 'Phrase ' + (currentPhraseIndex+1) + ' of ' + phraseManifest.length + ' · Loop ' + phraseRepCount;
+      renderBeadTally();
+    }
+    var frac = (phraseAudioEl.currentTime - seg.start) / (seg.end - seg.start);
+    setRing(Math.max(0, Math.min(1, frac)));
+  });
+  phraseAudioEl.addEventListener('error', function(){
+    if(mode === 'phrases') positionLabel.textContent = "Couldn't play this recording.";
+    $('phraseStatus').textContent = "Couldn't play this audio file — try exporting it as .m4a or .mp3 instead.";
   });
 
   $('restartBtn').addEventListener('click', function(){
@@ -1299,6 +2073,158 @@
     exitGameMode();
   });
 
+  // ---------- tune practice panel ----------
+  function openTunePanel(){ tunePanel.classList.add('show'); overlay.classList.add('show'); }
+  function closeTunePanel(){ tunePanel.classList.remove('show'); overlay.classList.remove('show'); }
+  $('tuneBtn').addEventListener('click', openTunePanel);
+
+  $('tuneAudioInput').addEventListener('change', function(e){
+    var file = e.target.files && e.target.files[0];
+    if(!file) return;
+    loadTuneFile(file);
+  });
+
+  var tuneRateRange = $('tuneRateRange');
+  var tuneRateVal = $('tuneRateVal');
+  tuneRateRange.value = settings.tunePlaybackRate;
+  tuneRateVal.textContent = settings.tunePlaybackRate.toFixed(2) + '×';
+  tuneRateRange.addEventListener('input', function(){
+    settings.tunePlaybackRate = parseFloat(this.value);
+    tuneRateVal.textContent = settings.tunePlaybackRate.toFixed(2) + '×';
+    tuneAudioEl.playbackRate = settings.tunePlaybackRate;
+    saveSettings();
+  });
+
+  var tuneLoopToggle = $('tuneLoopToggle');
+  tuneLoopToggle.classList.toggle('on', settings.tuneLoop);
+  tuneLoopToggle.addEventListener('click', function(){
+    settings.tuneLoop = !settings.tuneLoop;
+    tuneLoopToggle.classList.toggle('on', settings.tuneLoop);
+    tuneAudioEl.loop = settings.tuneLoop;
+    saveSettings();
+  });
+
+  $('startTuneAudioBtn').addEventListener('click', function(){
+    closeTunePanel();
+    startTuneAudioMode();
+  });
+
+  $('removeTuneBtn').addEventListener('click', function(){
+    clearTuneBlob().catch(function(){});
+    if(currentTuneObjectUrl){ URL.revokeObjectURL(currentTuneObjectUrl); currentTuneObjectUrl = null; }
+    tuneAudioEl.removeAttribute('src');
+    tuneAudioEl.load();
+    $('tuneAudioStatus').textContent = 'No recording uploaded yet';
+    $('tuneAudioControlsField').style.display = 'none';
+    $('tuneAudioInput').value = '';
+    if(mode === 'tuneAudio') exitTuneAudioMode();
+  });
+
+  var tuneTextarea = $('tuneTextarea');
+  tuneTextarea.value = settings.tuneText || '';
+  tuneTextarea.addEventListener('input', function(){
+    settings.tuneText = this.value;
+    saveSettings();
+  });
+
+  var tuneDurationRange = $('tuneDurationRange');
+  var tuneDurationVal = $('tuneDurationVal');
+  tuneDurationRange.value = settings.tuneNoteDuration;
+  tuneDurationVal.textContent = settings.tuneNoteDuration + 's';
+  tuneDurationRange.addEventListener('input', function(){
+    settings.tuneNoteDuration = parseFloat(this.value);
+    tuneDurationVal.textContent = settings.tuneNoteDuration + 's';
+    saveSettings();
+  });
+
+  $('loadTuneBtn').addEventListener('click', function(){
+    var parsed = parseNotation(tuneTextarea.value);
+    if(parsed.flat.length === 0){
+      alert('No valid notes found. Use letters S R G M P D N (lowercase r g d n for komal, m for tivra Ma).');
+      return;
+    }
+    closeTunePanel();
+    startTunePractice(parsed);
+  });
+
+  loadTuneBlob().then(function(result){
+    if(result && result.blob){
+      activateTuneAudio(result.blob, result.name);
+    }
+  }).catch(function(){});
+
+  // ---------- phrase-manifest practice panel ----------
+  function openPhrasesPanel(){ phrasesPanel.classList.add('show'); overlay.classList.add('show'); }
+  function closePhrasesPanel(){ phrasesPanel.classList.remove('show'); overlay.classList.remove('show'); }
+  $('phrasesBtn').addEventListener('click', openPhrasesPanel);
+
+  function tryEnablePhraseStart(){
+    if(pendingPhraseAudio && pendingPhraseSegments && pendingPhraseSegments.length){
+      $('startPhrasesBtn').style.display = 'block';
+      $('removePhrasesBtn').style.display = 'block';
+      $('phraseStatus').textContent = pendingPhraseAudio.name + ' · ' + pendingPhraseSegments.length + ' phrase' + (pendingPhraseSegments.length === 1 ? '' : 's') + ' found';
+    }
+  }
+
+  $('phraseAudioInput').addEventListener('change', function(e){
+    var file = e.target.files && e.target.files[0];
+    if(!file) return;
+    pendingPhraseAudio = { blob: file, name: file.name };
+    tryEnablePhraseStart();
+  });
+
+  $('phraseManifestInput').addEventListener('change', function(e){
+    var file = e.target.files && e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var segs = parsePhraseManifest(reader.result);
+      if(!segs.length){
+        $('phraseStatus').textContent = "No phrases found in that manifest — check its format.";
+        return;
+      }
+      pendingPhraseSegments = segs;
+      tryEnablePhraseStart();
+    };
+    reader.onerror = function(){
+      $('phraseStatus').textContent = "Couldn't read that manifest file.";
+    };
+    reader.readAsText(file);
+  });
+
+  $('startPhrasesBtn').addEventListener('click', function(){
+    if(!pendingPhraseAudio || !pendingPhraseSegments) return;
+    savePhraseData(pendingPhraseAudio.blob, pendingPhraseAudio.name, pendingPhraseSegments).catch(function(){});
+    activatePhraseData(pendingPhraseAudio.blob, pendingPhraseAudio.name, pendingPhraseSegments);
+    closePhrasesPanel();
+    startPhrasePractice();
+  });
+
+  $('removePhrasesBtn').addEventListener('click', function(){
+    clearPhraseData().catch(function(){});
+    pendingPhraseAudio = null;
+    pendingPhraseSegments = null;
+    if(currentPhraseObjectUrl){ URL.revokeObjectURL(currentPhraseObjectUrl); currentPhraseObjectUrl = null; }
+    phraseAudioEl.removeAttribute('src');
+    phraseAudioEl.load();
+    phraseManifest = [];
+    $('phraseAudioInput').value = '';
+    $('phraseManifestInput').value = '';
+    $('phraseStatus').textContent = 'No phrases loaded yet';
+    $('startPhrasesBtn').style.display = 'none';
+    $('removePhrasesBtn').style.display = 'none';
+    if(mode === 'phrases') exitPhraseMode();
+  });
+
+  loadPhraseData().then(function(result){
+    if(result && result.blob && result.segments && result.segments.length){
+      pendingPhraseAudio = { blob: result.blob, name: result.name };
+      pendingPhraseSegments = result.segments;
+      activatePhraseData(result.blob, result.name, result.segments);
+      tryEnablePhraseStart();
+    }
+  }).catch(function(){});
+
   // ---------- settings panel ----------
   var settingsPanel = $('settingsPanel');
   var overlay = $('overlay');
@@ -1306,7 +2232,7 @@
   function closeSettingsFn(){ settingsPanel.classList.remove('show'); overlay.classList.remove('show'); }
   $('settingsBtn').addEventListener('click', openSettings);
   $('closeSettings').addEventListener('click', closeSettingsFn);
-  overlay.addEventListener('click', function(){ closeSettingsFn(); closeGamePanel(); });
+  overlay.addEventListener('click', function(){ closeSettingsFn(); closeGamePanel(); closeTunePanel(); closePhrasesPanel(); });
 
   var saSelect = $('saSelect');
   saSelect.value = settings.saMidi;

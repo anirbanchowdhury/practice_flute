@@ -1421,11 +1421,39 @@
     if(active) active.scrollIntoView({ behavior:'smooth', block:'nearest' });
   }
 
+  // Setting currentTime before the browser has loaded enough metadata is
+  // silently ignored (it snaps back to 0) — this is the classic cause of
+  // "every phrase just plays from the start". Queue the seek if not ready,
+  // and verify it actually landed; retry once, then surface a hint if the
+  // file's seeking still isn't cooperating (usually an mp4/m4a without
+  // "fast start" metadata placement).
+  function seekPhraseAudioTo(time, attempt){
+    attempt = attempt || 0;
+    if(phraseAudioEl.readyState < 1){
+      var onReady = function(){
+        phraseAudioEl.removeEventListener('loadedmetadata', onReady);
+        seekPhraseAudioTo(time, attempt);
+      };
+      phraseAudioEl.addEventListener('loadedmetadata', onReady);
+      return;
+    }
+    phraseAudioEl.currentTime = time;
+    setTimeout(function(){
+      if(Math.abs(phraseAudioEl.currentTime - time) > 0.75){
+        if(attempt < 2){
+          seekPhraseAudioTo(time, attempt + 1);
+        } else {
+          $('phraseStatus').textContent = "This file isn't seeking reliably in the browser — try re-exporting it as .wav, or with ffmpeg's -movflags +faststart, for accurate phrase jumps.";
+        }
+      }
+    }, 250);
+  }
+
   function selectPhrase(i){
     if(i < 0 || i >= phraseManifest.length) return;
     currentPhraseIndex = i;
     phraseRepCount = 0;
-    phraseAudioEl.currentTime = phraseManifest[i].start;
+    seekPhraseAudioTo(phraseManifest[i].start);
     updatePhraseDisplay();
   }
 
@@ -1440,7 +1468,7 @@
     nextBtn.style.opacity = '';
     currentPhraseIndex = 0;
     phraseRepCount = 0;
-    if(phraseManifest[0]) phraseAudioEl.currentTime = phraseManifest[0].start;
+    if(phraseManifest[0]) seekPhraseAudioTo(phraseManifest[0].start);
     renderPhraseList();
     updatePhraseDisplay();
   }

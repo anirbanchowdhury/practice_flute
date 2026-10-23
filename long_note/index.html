@@ -498,6 +498,65 @@
     color:var(--ink-dim);
     margin-top:6px;
   }
+  .video-wrap{
+    display:none;
+    width:100%;
+    max-width:420px;
+    margin:0 auto;
+  }
+  .video-wrap video{
+    display:block;
+    width:100%;
+    aspect-ratio:16/9;
+    background:#000;
+    border-radius:12px;
+    object-fit:contain;
+  }
+  .clip-title{
+    margin-top:10px;
+    font-size:13px;
+    font-weight:500;
+    color:var(--ink);
+    text-align:center;
+  }
+  .clip-seek{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:10px;
+  }
+  .clip-seek span{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    color:var(--ink-dim);
+    min-width:36px;
+    text-align:center;
+    font-variant-numeric:tabular-nums;
+  }
+  .clip-seek input{flex:1; accent-color:var(--brass);}
+  .speed-row{
+    display:flex;
+    justify-content:center;
+    gap:8px;
+    margin-top:12px;
+  }
+  .speed-row button{
+    background:var(--surface);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    border-radius:999px;
+    padding:6px 14px;
+    font-size:12.5px;
+    font-family:inherit;
+    cursor:pointer;
+  }
+  .speed-row button.active{
+    background:var(--brass-soft);
+    border-color:var(--brass);
+    color:var(--ink);
+    font-weight:600;
+  }
+  .phrase-list.compact{max-height:128px;}
   .tune-textarea{
     width:100%;
     background:var(--surface-2);
@@ -554,10 +613,23 @@
   <div class="ladder" id="ladder"></div>
   <div class="tune-view" id="tuneView"></div>
   <audio id="tuneAudioEl" style="display:none;"></audio>
-  <audio id="phraseAudioEl" style="display:none;"></audio>
   <div class="phrase-list" id="phraseListEl"></div>
 
   <div class="stage">
+    <div class="video-wrap" id="videoWrap">
+      <video id="phraseVideo" playsinline webkit-playsinline preload="auto" loop></video>
+      <div class="clip-title" id="clipTitle"></div>
+      <div class="clip-seek">
+        <span id="clipTime">0:00</span>
+        <input type="range" id="clipSeek" min="0" max="1000" value="0" aria-label="Seek within this segment">
+        <span id="clipDur">0:00</span>
+      </div>
+      <div class="speed-row" id="speedRow">
+        <button data-rate="0.5">0.5×</button>
+        <button data-rate="0.75">0.75×</button>
+        <button data-rate="1" class="active">1×</button>
+      </div>
+    </div>
     <div class="ring-wrap">
       <div class="breathe" id="breathe"></div>
       <svg class="ring" viewBox="0 0 200 200">
@@ -701,6 +773,14 @@
 
 <div class="settings-panel" id="phrasesPanel">
   <h3>Practice Phrases</h3>
+
+  <div class="field">
+    <label>Built-in lesson</label>
+    <button class="done-btn" id="startGamakBtn">Practice the Gamak lesson · 16 segments</button>
+    <div class="field-hint">12 instruction segments + 4 play-along segments, with video. Needs the <b>gamak</b> folder next to this page.</div>
+  </div>
+
+  <div class="field-hint" style="margin-bottom:14px;">— or load your own audio + manifest —</div>
 
   <div class="field">
     <label>Trimmed audio</label>
@@ -874,6 +954,7 @@
     tuneText: '',
     tuneLoop: true,
     tunePlaybackRate: 1,
+    clipRate: 1,
     refOn: true,
     refVolume: 1.4,
     droneOn: false,
@@ -908,9 +989,19 @@
   var phraseManifest = [];
   var currentPhraseIndex = 0;
   var phraseRepCount = 0;
-  var currentPhraseObjectUrl = null;
   var pendingPhraseAudio = null;
   var pendingPhraseSegments = null;
+  var pendingPhraseBuffers = null;
+  var phraseKind = null;          // 'clips' (built-in video) | 'buffer' (uploaded audio)
+  var phraseBuffers = [];
+  var phrasePlaying = false;
+  var phraseSource = null;
+  var phraseRaf = null;
+  var phraseOffset = 0;
+  var phraseStartTs = 0;
+  var phraseLoopsBase = 0;
+  var phraseLastT = 0;
+  var clipDragging = false;
   var elapsed = 0;
   var isPlaying = false;
   var playStartTs = 0;
@@ -949,7 +1040,13 @@
   var tuneAudioEl = $('tuneAudioEl');
   var phrasesPanel = $('phrasesPanel');
   var phraseListEl = $('phraseListEl');
-  var phraseAudioEl = $('phraseAudioEl');
+  var phraseVideo = $('phraseVideo');
+  var videoWrap = $('videoWrap');
+  var clipTitle = $('clipTitle');
+  var clipSeek = $('clipSeek');
+  var clipTimeEl = $('clipTime');
+  var clipDurEl = $('clipDur');
+  var ringWrapEl = document.querySelector('.ring-wrap');
 
   var CIRC = 2 * Math.PI * 90;
 
@@ -959,7 +1056,7 @@
     if(resetPlayback){
       stopPlayback();
       tuneAudioEl.pause();
-      phraseAudioEl.pause();
+      resetPhraseUi();
       currentIndex = 0;
       phase = 'note';
       mode = 'sequence';
@@ -1354,11 +1451,12 @@
     });
   }
 
-  function activatePhraseData(blob, name, segments){
-    if(currentPhraseObjectUrl) URL.revokeObjectURL(currentPhraseObjectUrl);
-    currentPhraseObjectUrl = URL.createObjectURL(blob);
-    phraseAudioEl.src = currentPhraseObjectUrl;
-    phraseManifest = segments;
+  // The built-in Gamak lesson: one short clip per segment, cut from the
+  // original video (files live in the gamak/ folder beside this page).
+  var GAMAK_SEGMENTS = [{"label": "Learn 1 · instruction", "src": "gamak/seg01.mp4", "poster": "gamak/seg01.jpg", "dur": 12.2}, {"label": "Learn 2 · instruction", "src": "gamak/seg02.mp4", "poster": "gamak/seg02.jpg", "dur": 36.97}, {"label": "Learn 3 · instruction", "src": "gamak/seg03.mp4", "poster": "gamak/seg03.jpg", "dur": 17.13}, {"label": "Learn 4 · instruction", "src": "gamak/seg04.mp4", "poster": "gamak/seg04.jpg", "dur": 13.33}, {"label": "Learn 5 · instruction", "src": "gamak/seg05.mp4", "poster": "gamak/seg05.jpg", "dur": 12.8}, {"label": "Learn 6 · instruction", "src": "gamak/seg06.mp4", "poster": "gamak/seg06.jpg", "dur": 75.7}, {"label": "Learn 7 · instruction", "src": "gamak/seg07.mp4", "poster": "gamak/seg07.jpg", "dur": 12.73}, {"label": "Learn 8 · instruction", "src": "gamak/seg08.mp4", "poster": "gamak/seg08.jpg", "dur": 17.57}, {"label": "Learn 9 · instruction", "src": "gamak/seg09.mp4", "poster": "gamak/seg09.jpg", "dur": 24.4}, {"label": "Learn 10 · instruction", "src": "gamak/seg10.mp4", "poster": "gamak/seg10.jpg", "dur": 18.73}, {"label": "Learn 11 · instruction", "src": "gamak/seg11.mp4", "poster": "gamak/seg11.jpg", "dur": 35.8}, {"label": "Learn 12 · instruction", "src": "gamak/seg12.mp4", "poster": "gamak/seg12.jpg", "dur": 13.23}, {"label": "Play-along 1 · each note ×4 (100 bpm)", "src": "gamak/seg13.mp4", "poster": "gamak/seg13.jpg", "dur": 75.8}, {"label": "Play-along 2 · each note ×2 (100 bpm)", "src": "gamak/seg14.mp4", "poster": "gamak/seg14.jpg", "dur": 38.3}, {"label": "Play-along 3 · each note ×1 (100 bpm)", "src": "gamak/seg15.mp4", "poster": "gamak/seg15.jpg", "dur": 76.7}, {"label": "Play-along 4 · continued (100 bpm)", "src": "gamak/seg16.mp4", "poster": "gamak/seg16.jpg", "dur": 154.3}];
+
+  function phraseTimeText(seg){
+    return seg.src ? formatTime(seg.dur) : (formatTime(seg.start) + '–' + formatTime(seg.end));
   }
 
   function renderPhraseList(){
@@ -1371,14 +1469,10 @@
       labelSpan.textContent = (i+1) + '. ' + seg.label;
       var timeSpan = document.createElement('span');
       timeSpan.className = 'p-time';
-      timeSpan.textContent = formatTime(seg.start) + '–' + formatTime(seg.end);
+      timeSpan.textContent = phraseTimeText(seg);
       row.appendChild(labelSpan);
       row.appendChild(timeSpan);
-      row.addEventListener('click', function(){
-        var wasPlaying = !phraseAudioEl.paused;
-        selectPhrase(i);
-        if(wasPlaying) phraseAudioEl.play();
-      });
+      row.addEventListener('click', function(){ selectPhrase(i); });
       phraseListEl.appendChild(row);
     });
   }
@@ -1396,18 +1490,22 @@
     roundsLabel.textContent = rounds > 0 ? ('Round ' + rounds) : '';
   }
 
+  function phrasePositionText(){
+    return (phraseKind === 'clips' ? 'Segment ' : 'Phrase ') + (currentPhraseIndex+1) + ' of ' + phraseManifest.length + ' · Loop ' + phraseRepCount;
+  }
+
   function updatePhraseDisplay(){
     var seg = phraseManifest[currentPhraseIndex];
     if(!seg) return;
     sargamLabel.textContent = String(currentPhraseIndex + 1);
     saptakTag.textContent = 'looping phrase';
     saptakTag.className = 'saptak-tag pause';
-    westernLabel.textContent = seg.label + ' · ' + formatTime(seg.start) + '–' + formatTime(seg.end);
-    positionLabel.textContent = 'Phrase ' + (currentPhraseIndex+1) + ' of ' + phraseManifest.length + ' · Loop ' + phraseRepCount;
+    westernLabel.textContent = seg.label + ' · ' + phraseTimeText(seg);
+    positionLabel.textContent = phrasePositionText();
     modeToggle.style.display = 'block';
-    modeToggle.textContent = 'Practicing phrases · tap to exit';
+    modeToggle.textContent = (phraseKind === 'clips' ? 'Practicing the Gamak lesson' : 'Practicing phrases') + ' · tap to exit';
     timerLabel.textContent = '';
-    setRing(0);
+    if(phraseKind !== 'clips') setRing(0);
     renderBeadTally();
     updateActivePhraseRow();
   }
@@ -1421,45 +1519,127 @@
     if(active) active.scrollIntoView({ behavior:'smooth', block:'nearest' });
   }
 
-  // Setting currentTime before the browser has loaded enough metadata is
-  // silently ignored (it snaps back to 0) — this is the classic cause of
-  // "every phrase just plays from the start". Queue the seek if not ready,
-  // and verify it actually landed; retry once, then surface a hint if the
-  // file's seeking still isn't cooperating (usually an mp4/m4a without
-  // "fast start" metadata placement).
-  function seekPhraseAudioTo(time, attempt){
-    attempt = attempt || 0;
-    if(phraseAudioEl.readyState < 1){
-      var onReady = function(){
-        phraseAudioEl.removeEventListener('loadedmetadata', onReady);
-        seekPhraseAudioTo(time, attempt);
-      };
-      phraseAudioEl.addEventListener('loadedmetadata', onReady);
-      return;
-    }
-    phraseAudioEl.currentTime = time;
-    setTimeout(function(){
-      if(Math.abs(phraseAudioEl.currentTime - time) > 0.75){
-        if(attempt < 2){
-          seekPhraseAudioTo(time, attempt + 1);
-        } else {
-          $('phraseStatus').textContent = "This file isn't seeking reliably in the browser — try re-exporting it as .wav, or with ffmpeg's -movflags +faststart, for accurate phrase jumps.";
-        }
-      }
-    }, 250);
+  function showPhraseVideoUi(on){
+    videoWrap.style.display = on ? 'block' : 'none';
+    ringWrapEl.style.display = on ? 'none' : '';
+    phraseListEl.classList.toggle('compact', !!on);
   }
+
+  function updateClipTimeUi(){
+    var d = phraseVideo.duration;
+    if(!d || !isFinite(d)){ var s = phraseManifest[currentPhraseIndex]; d = s ? s.dur : 0; }
+    var t = phraseVideo.currentTime || 0;
+    clipTimeEl.textContent = formatTime(t);
+    clipDurEl.textContent = formatTime(d);
+    if(!clipDragging) clipSeek.value = d ? Math.round(Math.min(1, t / d) * 1000) : 0;
+  }
+
+  function loadClip(i){
+    var seg = phraseManifest[i];
+    if(!seg) return;
+    phraseVideo.defaultPlaybackRate = settings.clipRate;
+    phraseVideo.poster = seg.poster || '';
+    phraseVideo.src = seg.src;
+    phraseVideo.playbackRate = settings.clipRate;
+    clipTitle.textContent = seg.label;
+    phraseLastT = 0;
+    clipTimeEl.textContent = '0:00';
+    clipDurEl.textContent = formatTime(seg.dur);
+    clipSeek.value = 0;
+  }
+
+  function setPhrasePlayUi(on){
+    if(mode !== 'phrases') return;
+    playBtn.textContent = on ? '❚❚' : '▶';
+    playBtn.setAttribute('aria-label', on ? 'Pause' : 'Play');
+    if(on){ breatheEl.classList.add('on'); requestWakeLock(); }
+    else { breatheEl.classList.remove('on'); releaseWakeLock(); }
+  }
+
+  function onPhraseRep(){
+    positionLabel.textContent = phrasePositionText();
+    renderBeadTally();
+  }
+
+  function phraseTick(){
+    if(!phrasePlaying) return;
+    if(phraseKind === 'clips'){
+      var t = phraseVideo.currentTime;
+      if(t < phraseLastT - 0.4 && !clipDragging){ phraseRepCount++; onPhraseRep(); }
+      phraseLastT = t;
+      updateClipTimeUi();
+    } else {
+      var buf = phraseBuffers[currentPhraseIndex];
+      if(buf){
+        var el = audioCtx.currentTime - phraseStartTs;
+        var loops = phraseLoopsBase + Math.floor(el / buf.duration);
+        if(loops > phraseRepCount){ phraseRepCount = loops; onPhraseRep(); }
+        setRing((el % buf.duration) / buf.duration);
+      }
+    }
+    phraseRaf = requestAnimationFrame(phraseTick);
+  }
+
+  function phrasePlay(){
+    if(!phraseManifest.length || phrasePlaying) return;
+    if(phraseKind === 'clips'){
+      var p = phraseVideo.play();
+      if(p && p.catch) p.catch(function(){ phraseHalt(false); });
+      phraseLastT = phraseVideo.currentTime || 0;
+    } else {
+      var buf = phraseBuffers[currentPhraseIndex];
+      if(!buf) return;
+      ensureAudio();
+      phraseSource = audioCtx.createBufferSource();
+      phraseSource.buffer = buf;
+      phraseSource.loop = true;
+      phraseSource.connect(masterBus);
+      phraseSource.start(0, phraseOffset);
+      phraseStartTs = audioCtx.currentTime - phraseOffset;
+      phraseLoopsBase = phraseRepCount;
+    }
+    phrasePlaying = true;
+    setPhrasePlayUi(true);
+    phraseRaf = requestAnimationFrame(phraseTick);
+  }
+
+  // Stops whatever is playing. keepPos = remember where in the phrase we were.
+  function phraseHalt(keepPos){
+    if(phraseRaf){ cancelAnimationFrame(phraseRaf); phraseRaf = null; }
+    if(phraseKind === 'clips'){
+      try{ phraseVideo.pause(); }catch(e){}
+    } else if(phraseSource){
+      if(keepPos && phraseBuffers[currentPhraseIndex]){
+        var dur = phraseBuffers[currentPhraseIndex].duration;
+        phraseOffset = (((audioCtx.currentTime - phraseStartTs) % dur) + dur) % dur;
+      }
+      try{ phraseSource.stop(); }catch(e){}
+      try{ phraseSource.disconnect(); }catch(e){}
+      phraseSource = null;
+    }
+    if(!keepPos) phraseOffset = 0;
+    phrasePlaying = false;
+    setPhrasePlayUi(false);
+  }
+
+  function phrasePause(){ phraseHalt(true); }
 
   function selectPhrase(i){
     if(i < 0 || i >= phraseManifest.length) return;
+    var wasPlaying = phrasePlaying;
+    phraseHalt(false);
     currentPhraseIndex = i;
     phraseRepCount = 0;
-    seekPhraseAudioTo(phraseManifest[i].start);
+    phraseOffset = 0;
+    if(phraseKind === 'clips') loadClip(i);
     updatePhraseDisplay();
+    if(wasPlaying) phrasePlay();
   }
 
-  function startPhrasePractice(){
+  function enterPhraseMode(){
     stopPlayback();
     tuneAudioEl.pause();
+    phraseHalt(false);
     mode = 'phrases';
     ladderEl.style.display = 'none';
     tuneViewEl.style.display = 'none';
@@ -1468,13 +1648,37 @@
     nextBtn.style.opacity = '';
     currentPhraseIndex = 0;
     phraseRepCount = 0;
-    if(phraseManifest[0]) seekPhraseAudioTo(phraseManifest[0].start);
+    phraseOffset = 0;
+    showPhraseVideoUi(phraseKind === 'clips');
     renderPhraseList();
+    if(phraseKind === 'clips') loadClip(0);
     updatePhraseDisplay();
   }
 
+  function startGamakPractice(){
+    phraseKind = 'clips';
+    phraseManifest = GAMAK_SEGMENTS;
+    phraseBuffers = [];
+    enterPhraseMode();
+  }
+
+  function startPhrasePractice(){
+    phraseKind = 'buffer';
+    phraseManifest = pendingPhraseSegments;
+    phraseBuffers = pendingPhraseBuffers;
+    enterPhraseMode();
+  }
+
+  // Stop playback and put the stage back to normal (used when leaving phrase mode).
+  function resetPhraseUi(){
+    phraseHalt(false);
+    showPhraseVideoUi(false);
+    phraseListEl.classList.remove('compact');
+    try{ phraseVideo.removeAttribute('src'); phraseVideo.load(); }catch(e){}
+  }
+
   function exitPhraseMode(){
-    phraseAudioEl.pause();
+    resetPhraseUi();
     mode = 'sequence';
     ladderEl.style.display = '';
     phraseListEl.style.display = 'none';
@@ -1483,6 +1687,47 @@
     phase = 'note';
     elapsed = 0;
     updateDisplay();
+  }
+
+  // ---- uploaded audio: decode once, cut into one buffer per phrase ----
+  // Each phrase becomes its own AudioBuffer that loops sample-accurately, so
+  // there is no <audio>.currentTime seeking (which iOS Safari handles badly
+  // for blob audio — the reason every phrase used to replay the first one).
+  function readBlobArrayBuffer(blob){
+    if(blob.arrayBuffer) return blob.arrayBuffer();
+    return new Promise(function(resolve, reject){
+      var r = new FileReader();
+      r.onload = function(){ resolve(r.result); };
+      r.onerror = function(){ reject(r.error); };
+      r.readAsArrayBuffer(blob);
+    });
+  }
+
+  function decodePhraseBuffers(blob, segments){
+    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    return readBlobArrayBuffer(blob).then(function(ab){
+      var ctx;
+      try{ ctx = new OAC(1, 1, 22050); }catch(e){ ctx = new OAC(1, 1, 44100); }
+      return new Promise(function(resolve, reject){
+        var p = ctx.decodeAudioData(ab, resolve, reject);
+        if(p && typeof p.then === 'function') p.then(resolve, reject);
+      }).then(function(full){
+        var sr = full.sampleRate, nch = full.numberOfChannels, out = [];
+        segments.forEach(function(seg){
+          var s = Math.max(0, Math.floor(seg.start * sr));
+          var e = Math.min(full.length, Math.floor(seg.end * sr));
+          var len = Math.max(1, e - s);
+          var b = ctx.createBuffer(1, len, sr);
+          var dst = b.getChannelData(0);
+          for(var c=0;c<nch;c++){
+            var chan = full.getChannelData(c);
+            for(var k=0;k<len && (s+k)<chan.length;k++) dst[k] += chan[s+k] / nch;
+          }
+          out.push(b);
+        });
+        return out;
+      });
+    });
   }
 
   // ---------- "find the note" game ----------
@@ -1613,7 +1858,7 @@
   }
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState === 'visible' && !wakeLock){
-      var stillPlaying = isPlaying || (!tuneAudioEl.paused) || (!phraseAudioEl.paused);
+      var stillPlaying = isPlaying || (!tuneAudioEl.paused) || phrasePlaying;
       if(stillPlaying) requestWakeLock();
     }
   });
@@ -1923,31 +2168,19 @@
       return;
     }
     if(mode === 'phrases'){
-      if(phraseAudioEl.paused) phraseAudioEl.play(); else phraseAudioEl.pause();
+      if(phrasePlaying) phrasePause(); else phrasePlay();
       return;
     }
     if(isPlaying) pause(); else play();
   });
   prevBtn.addEventListener('click', function(){
     if(mode === 'tuneAudio'){ tuneAudioEl.currentTime = Math.max(0, tuneAudioEl.currentTime - 5); return; }
-    if(mode === 'phrases'){
-      var wasPlaying = !phraseAudioEl.paused;
-      selectPhrase(Math.max(0, currentPhraseIndex - 1));
-      renderPhraseList();
-      if(wasPlaying) phraseAudioEl.play();
-      return;
-    }
+    if(mode === 'phrases'){ selectPhrase(Math.max(0, currentPhraseIndex - 1)); return; }
     goTo(currentIndex - 1);
   });
   nextBtn.addEventListener('click', function(){
     if(mode === 'tuneAudio'){ tuneAudioEl.currentTime = Math.min(tuneAudioEl.duration || 0, tuneAudioEl.currentTime + 5); return; }
-    if(mode === 'phrases'){
-      var wasPlaying = !phraseAudioEl.paused;
-      selectPhrase(Math.min(phraseManifest.length - 1, currentPhraseIndex + 1));
-      renderPhraseList();
-      if(wasPlaying) phraseAudioEl.play();
-      return;
-    }
+    if(mode === 'phrases'){ selectPhrase(Math.min(phraseManifest.length - 1, currentPhraseIndex + 1)); return; }
     goTo(currentIndex + 1);
   });
   modeToggle.addEventListener('click', function(){
@@ -1988,36 +2221,35 @@
     $('tuneAudioControlsField').style.display = 'none';
   });
 
-  phraseAudioEl.addEventListener('play', function(){
-    if(mode !== 'phrases') return;
-    playBtn.textContent = '❚❚';
-    playBtn.setAttribute('aria-label', 'Pause');
-    breatheEl.classList.add('on');
-    requestWakeLock();
+  phraseVideo.addEventListener('error', function(){
+    if(mode !== 'phrases' || phraseKind !== 'clips' || !phraseVideo.getAttribute('src')) return;
+    phraseHalt(false);
+    clipTitle.textContent = "Couldn't load this clip — is the gamak folder uploaded next to this page?";
   });
-  phraseAudioEl.addEventListener('pause', function(){
-    if(mode !== 'phrases') return;
-    playBtn.textContent = '▶';
-    playBtn.setAttribute('aria-label', 'Play');
-    breatheEl.classList.remove('on');
-    releaseWakeLock();
+  phraseVideo.addEventListener('loadedmetadata', function(){ if(mode === 'phrases') updateClipTimeUi(); });
+  phraseVideo.addEventListener('timeupdate', function(){ if(mode === 'phrases' && !phrasePlaying) updateClipTimeUi(); });
+
+  clipSeek.addEventListener('pointerdown', function(){ clipDragging = true; });
+  clipSeek.addEventListener('input', function(){
+    var d = phraseVideo.duration;
+    if(!d || !isFinite(d)) return;
+    var t = (clipSeek.value / 1000) * d;
+    phraseVideo.currentTime = t;
+    phraseLastT = t;
+    clipTimeEl.textContent = formatTime(t);
   });
-  phraseAudioEl.addEventListener('timeupdate', function(){
-    if(mode !== 'phrases') return;
-    var seg = phraseManifest[currentPhraseIndex];
-    if(!seg) return;
-    if(phraseAudioEl.currentTime >= seg.end - 0.03){
-      phraseRepCount++;
-      phraseAudioEl.currentTime = seg.start;
-      positionLabel.textContent = 'Phrase ' + (currentPhraseIndex+1) + ' of ' + phraseManifest.length + ' · Loop ' + phraseRepCount;
-      renderBeadTally();
-    }
-    var frac = (phraseAudioEl.currentTime - seg.start) / (seg.end - seg.start);
-    setRing(Math.max(0, Math.min(1, frac)));
-  });
-  phraseAudioEl.addEventListener('error', function(){
-    if(mode === 'phrases') positionLabel.textContent = "Couldn't play this recording.";
-    $('phraseStatus').textContent = "Couldn't play this audio file — try exporting it as .m4a or .mp3 instead.";
+  clipSeek.addEventListener('change', function(){ clipDragging = false; });
+  window.addEventListener('pointerup', function(){ clipDragging = false; });
+
+  Array.prototype.forEach.call($('speedRow').children, function(btn){
+    btn.classList.toggle('active', parseFloat(btn.dataset.rate) === settings.clipRate);
+    btn.addEventListener('click', function(){
+      settings.clipRate = parseFloat(btn.dataset.rate);
+      Array.prototype.forEach.call($('speedRow').children, function(b){ b.classList.toggle('active', b === btn); });
+      phraseVideo.defaultPlaybackRate = settings.clipRate;
+      phraseVideo.playbackRate = settings.clipRate;
+      saveSettings();
+    });
   });
 
   $('restartBtn').addEventListener('click', function(){
@@ -2186,13 +2418,31 @@
   function closePhrasesPanel(){ phrasesPanel.classList.remove('show'); overlay.classList.remove('show'); }
   $('phrasesBtn').addEventListener('click', openPhrasesPanel);
 
+  function setPhraseStatus(t){ $('phraseStatus').textContent = t; }
+
+  // Decode the uploaded audio and cut it into per-phrase buffers; only then
+  // offer the Start button.
   function tryEnablePhraseStart(){
-    if(pendingPhraseAudio && pendingPhraseSegments && pendingPhraseSegments.length){
+    if(!(pendingPhraseAudio && pendingPhraseSegments && pendingPhraseSegments.length)) return;
+    var audio = pendingPhraseAudio, segs = pendingPhraseSegments;
+    pendingPhraseBuffers = null;
+    $('startPhrasesBtn').style.display = 'none';
+    $('removePhrasesBtn').style.display = 'block';
+    setPhraseStatus('Preparing ' + audio.name + '…');
+    decodePhraseBuffers(audio.blob, segs).then(function(buffers){
+      if(pendingPhraseAudio !== audio || pendingPhraseSegments !== segs) return;
+      pendingPhraseBuffers = buffers;
       $('startPhrasesBtn').style.display = 'block';
-      $('removePhrasesBtn').style.display = 'block';
-      $('phraseStatus').textContent = pendingPhraseAudio.name + ' · ' + pendingPhraseSegments.length + ' phrase' + (pendingPhraseSegments.length === 1 ? '' : 's') + ' found';
-    }
+      setPhraseStatus(audio.name + ' · ' + segs.length + ' phrase' + (segs.length === 1 ? '' : 's') + ' ready');
+    }).catch(function(){
+      setPhraseStatus("Couldn't decode that audio file — try .m4a, .mp3 or .wav (very long files can also run out of memory).");
+    });
   }
+
+  $('startGamakBtn').addEventListener('click', function(){
+    closePhrasesPanel();
+    startGamakPractice();
+  });
 
   $('phraseAudioInput').addEventListener('change', function(e){
     var file = e.target.files && e.target.files[0];
@@ -2208,22 +2458,19 @@
     reader.onload = function(){
       var segs = parsePhraseManifest(reader.result);
       if(!segs.length){
-        $('phraseStatus').textContent = "No phrases found in that manifest — check its format.";
+        setPhraseStatus("No phrases found in that manifest — check its format.");
         return;
       }
       pendingPhraseSegments = segs;
       tryEnablePhraseStart();
     };
-    reader.onerror = function(){
-      $('phraseStatus').textContent = "Couldn't read that manifest file.";
-    };
+    reader.onerror = function(){ setPhraseStatus("Couldn't read that manifest file."); };
     reader.readAsText(file);
   });
 
   $('startPhrasesBtn').addEventListener('click', function(){
-    if(!pendingPhraseAudio || !pendingPhraseSegments) return;
+    if(!pendingPhraseAudio || !pendingPhraseSegments || !pendingPhraseBuffers) return;
     savePhraseData(pendingPhraseAudio.blob, pendingPhraseAudio.name, pendingPhraseSegments).catch(function(){});
-    activatePhraseData(pendingPhraseAudio.blob, pendingPhraseAudio.name, pendingPhraseSegments);
     closePhrasesPanel();
     startPhrasePractice();
   });
@@ -2232,23 +2479,19 @@
     clearPhraseData().catch(function(){});
     pendingPhraseAudio = null;
     pendingPhraseSegments = null;
-    if(currentPhraseObjectUrl){ URL.revokeObjectURL(currentPhraseObjectUrl); currentPhraseObjectUrl = null; }
-    phraseAudioEl.removeAttribute('src');
-    phraseAudioEl.load();
-    phraseManifest = [];
+    pendingPhraseBuffers = null;
     $('phraseAudioInput').value = '';
     $('phraseManifestInput').value = '';
-    $('phraseStatus').textContent = 'No phrases loaded yet';
+    setPhraseStatus('No phrases loaded yet');
     $('startPhrasesBtn').style.display = 'none';
     $('removePhrasesBtn').style.display = 'none';
-    if(mode === 'phrases') exitPhraseMode();
+    if(mode === 'phrases' && phraseKind === 'buffer') exitPhraseMode();
   });
 
   loadPhraseData().then(function(result){
     if(result && result.blob && result.segments && result.segments.length){
       pendingPhraseAudio = { blob: result.blob, name: result.name };
       pendingPhraseSegments = result.segments;
-      activatePhraseData(result.blob, result.name, result.segments);
       tryEnablePhraseStart();
     }
   }).catch(function(){});

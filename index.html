@@ -66,13 +66,31 @@
     border-radius:14px;
     padding:.9rem .95rem;
     margin-bottom:.7rem;
+    scroll-margin-top:7.5rem;
+    transition:background .2s,border-color .2s;
   }
+  .seg-card.last{
+    background:var(--moss-light);
+    border-color:var(--moss);
+    box-shadow:0 0 0 1px var(--moss);
+  }
+  .last-tag{
+    display:none;
+    font-size:.64rem;letter-spacing:.06em;text-transform:uppercase;
+    color:#fff;background:var(--moss);border-radius:6px;
+    padding:.12rem .4rem;margin-left:.5rem;vertical-align:middle;font-weight:600;
+  }
+  .seg-card.last .last-tag{display:inline-block;}
+  .seg-card.last .reps-stepper,
+  .seg-card.last .btn-once{background:#fff;}
   .seg-top{display:flex;justify-content:space-between;align-items:baseline;}
   .seg-label{font-size:.96rem;font-weight:600;}
   .seg-time{font-size:.74rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
   .beads{display:flex;flex-wrap:wrap;gap:4px;margin:.55rem 0 .7rem;min-height:10px;}
   .bead{width:9px;height:9px;border-radius:50%;background:var(--moss-light);}
+  .seg-card.last .bead{background:#fff;}
   .bead.filled{background:var(--moss);}
+  .seg-card.last .bead.filled{background:var(--moss);}
   .bead-overflow{font-size:.72rem;color:var(--moss);margin-left:2px;}
 
   .seg-controls{display:flex;align-items:center;gap:.5rem;}
@@ -81,6 +99,7 @@
     width:26px;height:26px;border-radius:7px;border:none;background:#fff;
     font-size:.95rem;color:var(--ink);
   }
+  .seg-card.last .reps-stepper button{background:var(--paper);}
   .reps-val{font-size:.82rem;min-width:18px;text-align:center;font-variant-numeric:tabular-nums;}
   .btn{
     border:none;border-radius:10px;font-size:.85rem;font-weight:600;
@@ -164,6 +183,7 @@ const segListEl = document.getElementById('segList');
 const todayCountEl = document.getElementById('todayCount');
 const todayDateEl = document.getElementById('todayDate');
 const audioStatus = document.getElementById('audioStatus');
+const audioPickBtn = document.getElementById('audioPickBtn');
 
 const DEFAULT_SEGMENTS = [
   {id:"seg-1",label:"Segment 1",start:0,end:7000,reps:5},
@@ -190,7 +210,63 @@ let segments = [];
 let log = {};
 let nextIdCounter = 100;
 let current = null;
+let lastSegId = null;
+let activeCheck = null;      // current timeupdate listener, so we can always remove it
+let audioObjectUrl = null;
 
+/* ---------- Persistent audio (IndexedDB) ---------- */
+const DB_NAME = 'flute-practice-db';
+const STORE = 'audio';
+const AUDIO_KEY = 'current';
+
+function openDB(){
+  return new Promise((resolve, reject) => {
+    if(!window.indexedDB){ reject(new Error('no indexedDB')); return; }
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function saveAudioToDB(name, type, buffer){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put({name, type, buffer}, AUDIO_KEY);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+  });
+}
+async function loadAudioFromDB(){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(AUDIO_KEY);
+    req.onsuccess = () => { db.close(); resolve(req.result || null); };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+function setAudioFromBuffer(name, type, buffer, saved){
+  if(audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
+  const blob = new Blob([buffer], {type: type || 'audio/mp4'});
+  audioObjectUrl = URL.createObjectURL(blob);
+  player.src = audioObjectUrl;
+  audioPickBtn.textContent = name + '  ·  tap to replace';
+  audioStatus.innerHTML = `<span class="dot"></span>${name}` + (saved ? ' — saved on this device' : ' — loaded (could not save for next time)');
+}
+
+async function restoreAudio(){
+  try{
+    const rec = await loadAudioFromDB();
+    if(rec && rec.buffer){
+      setAudioFromBuffer(rec.name, rec.type, rec.buffer, true);
+    }
+  }catch(e){ /* nothing stored or storage unavailable */ }
+}
+
+/* ---------- Helpers ---------- */
 function todayKey(){
   return new Date().toLocaleDateString('en-CA');
 }
@@ -222,7 +298,17 @@ function loadStorage(){
   }catch(e){
     log = {};
   }
+  try{
+    lastSegId = localStorage.getItem('flute-last') || null;
+  }catch(e){
+    lastSegId = null;
+  }
   render();
+  // bring the last-played segment into view on open
+  if(lastSegId){
+    const el = segListEl.querySelector(`.seg-card[data-id="${lastSegId}"]`);
+    if(el) setTimeout(() => el.scrollIntoView({block:'center'}), 50);
+  }
 }
 
 function saveSegments(){
@@ -230,6 +316,14 @@ function saveSegments(){
 }
 function saveLog(){
   try{ localStorage.setItem('flute-log', JSON.stringify(log)); }catch(e){}
+}
+
+function setLast(segId){
+  lastSegId = segId;
+  try{ localStorage.setItem('flute-last', segId); }catch(e){}
+  segListEl.querySelectorAll('.seg-card').forEach(c => {
+    c.classList.toggle('last', c.dataset.id === segId);
+  });
 }
 
 function todayTotal(){
@@ -267,12 +361,12 @@ function render(){
   segListEl.innerHTML = '';
   segments.forEach(seg => {
     const card = document.createElement('div');
-    card.className = 'seg-card';
+    card.className = 'seg-card' + (seg.id === lastSegId ? ' last' : '');
     card.dataset.id = seg.id;
     const isActive = current && current.segId === seg.id;
     card.innerHTML = `
       <div class="seg-top">
-        <span class="seg-label">${seg.label}</span>
+        <span><span class="seg-label">${seg.label}</span><span class="last-tag">Last played</span></span>
         <span class="seg-time">${fmt(seg.start)}–${fmt(seg.end)}</span>
       </div>
       <div class="beads">${renderBeads(segCountToday(seg.id))}</div>
@@ -297,25 +391,40 @@ function render(){
   });
 }
 
+/* ---------- Playback ---------- */
+function clearCheck(){
+  if(activeCheck){
+    player.removeEventListener('timeupdate', activeCheck);
+    activeCheck = null;
+  }
+}
+
 function playOnce(seg, onDone){
   if(!player.src){
     audioStatus.innerHTML = '<span class="dot off"></span>Load an audio file first';
-    return;
+    return false;
   }
+  clearCheck();
+  setLast(seg.id);
   player.currentTime = seg.start/1000;
   player.play().catch(()=>{});
-  function check(){
+  activeCheck = function(){
     if(player.currentTime*1000 >= seg.end - 60){
       player.pause();
-      player.removeEventListener('timeupdate', check);
+      clearCheck();
       onDone();
     }
-  }
-  player.addEventListener('timeupdate', check);
+  };
+  player.addEventListener('timeupdate', activeCheck);
+  return true;
 }
 
 function startPractice(seg){
   if(current) return;
+  if(!player.src){
+    audioStatus.innerHTML = '<span class="dot off"></span>Load an audio file first';
+    return;
+  }
   current = {segId: seg.id, repsTotal: seg.reps, repsDone: 0, stopped: false};
   render();
   function step(){
@@ -339,6 +448,7 @@ function startPractice(seg){
 function stopPractice(){
   if(!current) return;
   current.stopped = true;
+  clearCheck();
   player.pause();
   current = null;
   render();
@@ -352,6 +462,7 @@ segListEl.addEventListener('click', (e) => {
   const seg = segments.find(s => s.id === id);
   const action = btn.dataset.action;
   if(action === 'once'){
+    if(current) stopPractice();
     playOnce(seg, () => incrementLog(seg.id));
   } else if(action === 'practice'){
     startPractice(seg);
@@ -365,22 +476,44 @@ segListEl.addEventListener('click', (e) => {
     saveSegments(); render();
   } else if(action === 'delete'){
     segments = segments.filter(s => s.id !== id);
+    if(lastSegId === id){
+      lastSegId = null;
+      try{ localStorage.removeItem('flute-last'); }catch(e){}
+    }
     saveSegments(); render();
   }
 });
 
-document.getElementById('audioPickBtn').addEventListener('click', () => {
+/* ---------- Audio file picker ---------- */
+audioPickBtn.addEventListener('click', () => {
   document.getElementById('audioInput').click();
 });
-document.getElementById('audioInput').addEventListener('change', (e) => {
+document.getElementById('audioInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if(!file) return;
-  const url = URL.createObjectURL(file);
-  player.src = url;
-  audioStatus.innerHTML = `<span class="dot"></span>${file.name}`;
-  document.getElementById('audioPickBtn').textContent = file.name;
+  if(current) stopPractice();
+  audioStatus.innerHTML = '<span class="dot off"></span>Loading…';
+  let buffer;
+  try{
+    buffer = await file.arrayBuffer();
+  }catch(err){
+    audioStatus.innerHTML = '<span class="dot off"></span>Could not read that file';
+    return;
+  }
+  let saved = true;
+  try{
+    await saveAudioToDB(file.name, file.type, buffer);
+    if(navigator.storage && navigator.storage.persist){
+      navigator.storage.persist().catch(()=>{});
+    }
+  }catch(err){
+    saved = false;
+  }
+  setAudioFromBuffer(file.name, file.type, buffer, saved);
+  e.target.value = '';
 });
 
+/* ---------- Manifest + manual add ---------- */
 document.getElementById('manifestBtn').addEventListener('click', () => {
   document.getElementById('manifestInput').click();
 });
@@ -407,6 +540,7 @@ document.getElementById('manifestInput').addEventListener('change', (e) => {
     }
   };
   reader.readAsText(file);
+  e.target.value = '';
 });
 
 document.getElementById('addSegBtn').addEventListener('click', () => {
@@ -427,6 +561,7 @@ document.getElementById('addSegBtn').addEventListener('click', () => {
   render();
 });
 
+/* ---------- History ---------- */
 const histToggle = document.getElementById('histToggle');
 const historyPanel = document.getElementById('historyPanel');
 histToggle.addEventListener('click', () => {
@@ -446,6 +581,7 @@ histToggle.addEventListener('click', () => {
 });
 
 loadStorage();
+restoreAudio();
 </script>
 </body>
 </html>

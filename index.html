@@ -390,6 +390,7 @@ function render(){
       </div>
       <div class="beads">${renderBeads(segCountToday(seg.id))}</div>
       <div class="seg-controls">${controls}</div>
+      ${isActive && current.paused ? `<div class="seg-controls" style="margin-top:.5rem;"><button class="btn btn-once" data-action="back5">−5s</button><button class="btn btn-once" data-action="back10">−10s</button><span class="hint" style="margin:0 0 0 .2rem;">resume from earlier</span></div>` : ''}
       ${isActive ? `<div class="progress-row"><span>Rep ${Math.min(current.repsDone+1, current.repsTotal)} of ${current.repsTotal}${current.paused ? ' · paused at ' + fmt(current.resumeAt*1000 - seg.start) : ''}</span></div>` : ''}
       <div class="progress-row" style="margin-top:.35rem;">
         <span></span>
@@ -478,6 +479,16 @@ function resumePractice(){
   playRep();
 }
 
+// While paused, move the restart point earlier (never before the segment's own start).
+function rewindPractice(sec){
+  const c = current;
+  if(!c || !c.paused) return;
+  c.resumeAt = Math.max(c.seg.start/1000, c.resumeAt - sec);
+  c.paused = false;
+  render();
+  playRep();
+}
+
 function stopPractice(){
   if(!current) return;
   clearGap();
@@ -502,6 +513,10 @@ segListEl.addEventListener('click', (e) => {
     pausePractice();
   } else if(action === 'resume'){
     resumePractice();
+  } else if(action === 'back5'){
+    rewindPractice(5);
+  } else if(action === 'back10'){
+    rewindPractice(10);
   } else if(action === 'stop'){
     stopPractice();
   } else if(action === 'inc'){
